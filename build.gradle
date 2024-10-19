@@ -1,6 +1,7 @@
 plugins {
     id 'antlr'
     id 'java-library'
+    id 'maven-publish'
 }
 
 group = 'org.taumc'
@@ -18,15 +19,33 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter'
 }
 
-
-
 generateGrammarSource {
     arguments += ["-visitor", '-package', 'org.taumc.glsl.grammar']
     outputDirectory = new File(buildDir.toString() + "/generated-src/antlr/main/org/taumc/glsl/grammar/")
 
 }
 
-
 test {
     useJUnitPlatform()
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
+    repositories {
+        maven {
+            name = "taumcRepository"
+            url = uri("https://maven.taumc.org/releases")
+            credentials {
+                username = System.getenv("MAVEN_USERNAME")
+                password = System.getenv("MAVEN_SECRET")
+            }
+            authentication {
+                basic(BasicAuthentication)
+            }
+        }
+    }
 }
