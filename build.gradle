@@ -1,0 +1,32 @@
+plugins {
+    id 'antlr'
+    id 'java-library'
+}
+
+group = 'org.taumc'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    antlr "org.antlr:antlr4:4.13.2"
+    implementation 'org.anarres:jcpp:1.4.14'
+
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+}
+
+
+
+generateGrammarSource {
+    arguments += ["-visitor", '-package', 'org.taumc.glsl.grammar']
+    outputDirectory = new File(buildDir.toString() + "/generated-src/antlr/main/org/taumc/glsl/grammar/")
+
+}
+
+
+test {
+    useJUnitPlatform()
+}
