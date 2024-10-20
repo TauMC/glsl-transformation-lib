@@ -1,7 +1,10 @@
 # Used when a commit is pushed to the repository
 name: build-snapshot
 
-on: [ push ]
+on:
+  push:
+    branches:
+      - main
 
 env:
   MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
