@@ -38,4 +38,12 @@ public class ExpressionRenamer extends GLSLParserBaseListener {
             handleIdentifier(ctx.IDENTIFIER());
         }
     }
+
+
+    @Override
+    public void enterType_specifier_nonarray(GLSLParser.Type_specifier_nonarrayContext ctx) {
+        if (ctx.TEXTURE2D() != null) {
+            handleIdentifier(ctx.TEXTURE2D());
+        }
+    }
 }

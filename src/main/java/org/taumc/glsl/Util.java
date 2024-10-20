@@ -174,10 +174,10 @@ public class Util {
         }
     }
 
-    public static void makeOutDeclaration(GLSLParser.Translation_unitContext root, GLSLParser.Single_declarationContext inDeclarationContext) {
-        String insert = inDeclarationContext.getText() + ";";
+    public static void makeOutDeclaration(GLSLParser.Translation_unitContext root, GLSLParser.Single_declarationContext inDeclarationContext, String name) {
+        String insert = Main.getFormattedShader(inDeclarationContext.fully_specified_type()) + name + ";"; //TODO, find a different way to make the out declaration
         insert = insert.replaceFirst("in", "out");
-        Util.prependMain(root, insert);
+        Util.injectVariable(root, insert);
     }
 
     public static Map<String, GLSLParser.Single_declarationContext> findQualifiers(GLSLParser.Translation_unitContext root, int type) {

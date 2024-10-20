@@ -42,12 +42,14 @@ public class Main {
         Util.replaceExpression(translationUnit, "vartest", "unint(5)");
         Util.removeUnusedFunctions(translationUnit);
         Util.rewriteStructArrays(translationUnit);
+        Util.renameFunctionCall(translationUnit, "texture2D", "texture");
+
         System.out.println(getFormattedShader(translationUnit));
 
         ShaderViewerGUI.display(parser, translationUnit);
     }
 
-    private static String getFormattedShader(ParseTree tree) {
+    public static String getFormattedShader(ParseTree tree) {
         StringBuilder sb = new StringBuilder();
         getFormattedShader(tree, sb);
         return sb.toString();
