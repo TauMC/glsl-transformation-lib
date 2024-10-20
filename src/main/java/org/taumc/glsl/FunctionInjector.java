@@ -5,7 +5,7 @@ import org.taumc.glsl.grammar.GLSLParserBaseListener;
 
 import java.util.concurrent.atomic.AtomicReference;
 
-public class FunctionInjector extends GLSLParserBaseListener {
+public class FunctionInjector extends GLSLCancelableBaseListener {
     private final AtomicReference<GLSLParser.External_declarationContext> atomic;
 
     public FunctionInjector(AtomicReference<GLSLParser.External_declarationContext> atomic) {
@@ -17,6 +17,7 @@ public class FunctionInjector extends GLSLParserBaseListener {
         if (ctx.getParent() instanceof GLSLParser.External_declarationContext list) {
             if (atomic.get() == null) {
                 atomic.set(list);
+                keepWalking = false;
             }
         }
     }

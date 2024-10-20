@@ -6,27 +6,20 @@ import org.antlr.v4.runtime.tree.TerminalNode;
 import org.taumc.glsl.grammar.GLSLParser;
 import org.taumc.glsl.grammar.GLSLParserBaseListener;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
+import java.util.List;
 import java.util.function.Predicate;
 
-public class IdentifierCollector extends GLSLCancelableBaseListener {
-    private final Predicate<String> identifierConsumer;
+public class CallCollector extends GLSLParserBaseListener {
+    private final List<String> variables;
 
-    /**
-     * Construct a new identifier collector.
-     * @param identifierConsumer Called with each identifier, return false to stop walking the tree
-     */
-    public IdentifierCollector(Predicate<String> identifierConsumer) {
-        this.identifierConsumer = identifierConsumer;
+    public CallCollector(List<String> variables) {
+        this.variables = variables;
     }
 
     private void handleIdentifier(TerminalNode node) {
         Token token = node.getSymbol();
         if(token instanceof CommonToken cToken) {
-            if(!identifierConsumer.test(cToken.getText())) {
-                keepWalking = false;
-            }
+            variables.add(cToken.getText());
         }
     }
 

@@ -6,24 +6,20 @@ import org.antlr.v4.runtime.tree.TerminalNode;
 import org.taumc.glsl.grammar.GLSLParser;
 import org.taumc.glsl.grammar.GLSLParserBaseListener;
 
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.List;
 
-public class HasVariable extends GLSLParserBaseListener {
+public class VariableCollector extends GLSLParserBaseListener {
 
-    private final String name;
-    private AtomicBoolean atomicBoolean;
+    private List<String> variables;
 
-    public HasVariable(String name, AtomicBoolean atomicBoolean) {
-        this.name = name;
-        this.atomicBoolean = atomicBoolean;
+    public VariableCollector(List<String> variables) {
+        this.variables = variables;
     }
 
     private void handleIdentifier(TerminalNode node) {
         Token token = node.getSymbol();
         if(token instanceof CommonToken cToken) {
-            if (name.equals(cToken.getText())) {
-                atomicBoolean.set(true);
-            }
+            variables.add(cToken.getText());
         }
     }
 

@@ -5,7 +5,7 @@ import org.taumc.glsl.grammar.GLSLParserBaseListener;
 
 import java.util.concurrent.atomic.AtomicReference;
 
-public class VariableInjector extends GLSLParserBaseListener {
+public class VariableInjector extends GLSLCancelableBaseListener {
     private final AtomicReference<GLSLParser.External_declarationContext> atomic;
     private boolean function = false;
 
@@ -35,6 +35,7 @@ public class VariableInjector extends GLSLParserBaseListener {
         if (atomic.get() == null || function) {
             function = false;
             atomic.set(list);
+            keepWalking = false;
         }
     }
 }

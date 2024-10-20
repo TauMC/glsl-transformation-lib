@@ -8,20 +8,22 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public class FunctionRemover extends GLSLCancelableBaseListener {
 
-    private final String name;
-    private final AtomicReference<GLSLParser.External_declarationContext> function;
+    private final List<String> names;
+    private final List<GLSLParser.External_declarationContext> functions;
 
-    public FunctionRemover(String name, AtomicReference<GLSLParser.External_declarationContext> function) {
-        this.name = name;
-        this.function = function;
+    public FunctionRemover(List<String> names, List<GLSLParser.External_declarationContext> function) {
+        this.names = names;
+        this.functions = function;
     }
 
     @Override
     public void enterFunction_prototype(GLSLParser.Function_prototypeContext ctx) {
-        if (ctx.IDENTIFIER().getText().equals(this.name)) {
+        if (this.names.contains(ctx.IDENTIFIER().getText())) {
             if (ctx.getParent().getParent() instanceof GLSLParser.External_declarationContext declarationContext) {
-                function.set(declarationContext);
-                keepWalking = false;
+                functions.add(declarationContext);
+                if (functions.size() == names.size()) {
+                    keepWalking = false;
+                }
             }
         }
     }

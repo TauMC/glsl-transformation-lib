@@ -7,7 +7,7 @@ import org.taumc.glsl.grammar.GLSLLexer;
 import org.taumc.glsl.grammar.GLSLParser;
 import org.taumc.glsl.grammar.GLSLParserBaseListener;
 
-public class PrependFunction extends GLSLParserBaseListener {
+public class PrependFunction extends GLSLCancelableBaseListener {
 
     private final String name;
     private final GLSLParser.StatementContext insert;
@@ -23,6 +23,7 @@ public class PrependFunction extends GLSLParserBaseListener {
     public void enterFunction_definition(GLSLParser.Function_definitionContext ctx) {
         if (ctx.function_prototype().IDENTIFIER().getText().equals(name)) {
             ctx.compound_statement_no_new_scope().statement_list().children.add(0, insert);
+            keepWalking = false;
         }
     }
 }

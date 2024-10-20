@@ -7,7 +7,7 @@ import org.taumc.glsl.grammar.GLSLParserBaseListener;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class TypeFinder extends GLSLParserBaseListener {
+public class TypeFinder extends GLSLCancelableBaseListener {
 
     private final String name;
     private final AtomicInteger type;
@@ -27,6 +27,7 @@ public class TypeFinder extends GLSLParserBaseListener {
                 if (ctx.fully_specified_type().type_specifier().type_specifier_nonarray().getChild(0) instanceof TerminalNode node) {
                     if (node.getSymbol() instanceof CommonToken t) {
                         type.set(t.getType());
+                        keepWalking = false;
                     }
                 }
             }
