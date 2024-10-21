@@ -82,7 +82,7 @@ public class Util {
 
     public static int findType(GLSLParser.Translation_unitContext root, String code) {
         AtomicInteger type = new AtomicInteger();
-        ParseTreeWalker.DEFAULT.walk(new TypeFinder(code, type), root);
+        FastTreeWalker.walk(new TypeFinder(code, type), root);
         return type.get();
     }
 
