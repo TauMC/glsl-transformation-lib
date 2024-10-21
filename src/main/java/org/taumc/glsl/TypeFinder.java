@@ -31,7 +31,8 @@ public class TypeFinder extends GLSLCancelableBaseListener {
                     }
                 }
             }
-        } else if (ctx.getParent() instanceof GLSLParser.Init_declarator_listContext listContext) {
+        }
+        if (ctx.getParent() instanceof GLSLParser.Init_declarator_listContext listContext) {
             for (var entry : listContext.typeless_declaration()) {
                 if (entry.IDENTIFIER().getSymbol() instanceof CommonToken cToken) {
                     if (cToken.getText().equals(name)) {
