@@ -76,7 +76,13 @@ public class Util {
         AtomicReference<ParserRuleContext> top = new AtomicReference<>();
         ParseTreeWalker.DEFAULT.walk(new RemoveVariable(code, top), root);
         if (top.get() != null) {
-            top.get().getParent().children.remove(top.get());
+            if (top.get().getParent() instanceof GLSLParser.Init_declarator_listContext listContext) {
+                int i = listContext.children.indexOf(top.get());
+                listContext.children.remove(i-1);
+                listContext.children.remove(i-1);
+            } else if (top.get().parent instanceof GLSLParser.Single_declarationContext singleContext) {
+                singleContext.getParent().getParent().getParent().getParent().children.remove(singleContext.getParent().getParent().getParent());
+            }
         }
     }
 

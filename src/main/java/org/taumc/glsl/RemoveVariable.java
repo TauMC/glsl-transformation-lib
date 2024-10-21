@@ -10,7 +10,7 @@ import org.taumc.glsl.grammar.GLSLParserBaseListener;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
-public class RemoveVariable extends GLSLParserBaseListener {
+public class RemoveVariable extends GLSLCancelableBaseListener {
     private final String code;
     private final AtomicReference<ParserRuleContext> top;
 
@@ -25,7 +25,22 @@ public class RemoveVariable extends GLSLParserBaseListener {
             Token token = ctx.IDENTIFIER().getSymbol();
             if(token instanceof CommonToken cToken) {
                 if(code.equals(cToken.getText())) {
-                    top.set(ctx.getParent().getParent().getParent().getParent());
+                    if (ctx.getParent() instanceof GLSLParser.Single_declarationContext) {
+                        if (ctx.getParent().getParent() instanceof GLSLParser.Init_declarator_listContext list) {
+                            if (!list.typeless_declaration().isEmpty()) {
+                                var entry = list.typeless_declaration(0);
+                                cToken.setText(entry.getText());
+                                top.set(entry);
+                                keepWalking = false;
+                            }
+                        } else {
+                            top.set(ctx.getParent());
+                        }
+                    }
+                    else if (ctx.getParent() instanceof GLSLParser.Init_declarator_listContext list) {
+                        top.set(ctx);
+                        keepWalking = false;
+                    }
                 }
             }
         }

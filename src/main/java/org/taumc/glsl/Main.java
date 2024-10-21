@@ -34,7 +34,8 @@ public class Main {
         Util.rename(translationUnit, "a_Color", "rewritten_Color");
         Set<Integer> found = new HashSet<>();
         Util.renameArray(translationUnit, "test", "replaced", found);
-        Util.removeVariable(translationUnit, "_vert_tex_diffuse_coord");
+        //Util.removeVariable(translationUnit, "_vert_tex_diffuse_coord");
+        Util.removeVariable(translationUnit, "testing");
         Util.removeConstAssignment(translationUnit);
         Util.renameFunctionCall(translationUnit, "_vert_init", "newCall");
         Util.renameAndWrapShadow(translationUnit, "function", "wrapped");

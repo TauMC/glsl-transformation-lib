@@ -5,7 +5,7 @@ uniform float framemod8;
 vec3 _vert_position;
 
 // The block texture coordinate of the vertex
-vec2 _vert_tex_diffuse_coord;
+vec2 _vert_tex_diffuse_coord, testing;
 
 // The light texture coordinate of the vertex
 ivec2 _vert_tex_light_coord;
