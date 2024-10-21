@@ -32,9 +32,9 @@ public class RemoveVariable extends GLSLCancelableBaseListener {
                                 cToken.setText(entry.getText());
                                 top.set(entry);
                                 keepWalking = false;
+                            } else {
+                                top.set(ctx);
                             }
-                        } else {
-                            top.set(ctx.getParent());
                         }
                     }
                     else if (ctx.getParent() instanceof GLSLParser.Init_declarator_listContext list) {
