@@ -10,6 +10,7 @@ import org.taumc.glsl.grammar.GLSLLexer;
 import org.taumc.glsl.grammar.GLSLParser;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -18,6 +19,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 public class Util {
 
@@ -61,7 +63,7 @@ public class Util {
     }
 
     public static void rename(GLSLParser.Translation_unitContext root, String oldName, String newName) {
-        ParseTreeWalker.DEFAULT.walk(new Renamer(Map.of(oldName, newName)), root);
+        ParseTreeWalker.DEFAULT.walk(new Renamer(Collections.singletonMap(oldName, newName)), root);
     }
 
     public static void replaceExpression(GLSLParser.Translation_unitContext root, String oldCode, String newCode) {
@@ -116,11 +118,11 @@ public class Util {
     }
 
     public static void renameArray(GLSLParser.Translation_unitContext root, String oldName, String newName, Set<Integer> found) {
-        ParseTreeWalker.DEFAULT.walk(new ArrayExpressionRewriteListener(Map.of(oldName, newName), found), root);
+        ParseTreeWalker.DEFAULT.walk(new ArrayExpressionRewriteListener(Collections.singletonMap(oldName, newName), found), root);
     }
 
     public static void renameFunctionCall(GLSLParser.Translation_unitContext root, String oldName, String newName) {
-        ParseTreeWalker.DEFAULT.walk(new ExpressionRenamer(Map.of(oldName, newName)), root);
+        ParseTreeWalker.DEFAULT.walk(new ExpressionRenamer(Collections.singletonMap(oldName, newName)), root);
     }
 
     public static void renameAndWrapShadow(GLSLParser.Translation_unitContext root, String oldName, String newName) {
@@ -149,7 +151,7 @@ public class Util {
             usedIdentifiers.add(id);
             return true;
         }), root);
-        List<String> functionsToRemove = result.stream().filter(name -> !usedIdentifiers.contains(name) && !name.equals("main")).toList();
+        List<String> functionsToRemove = result.stream().filter(name -> !usedIdentifiers.contains(name) && !name.equals("main")).collect(Collectors.toList());
         // TODO - remove all the functions in one walk of the tree
         for (String name : functionsToRemove) {
             removeFunction(root, name);
