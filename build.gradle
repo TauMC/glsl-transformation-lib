@@ -8,15 +8,42 @@ group = 'org.taumc'
 version = '1.0-SNAPSHOT'
 
 repositories {
+    maven {
+        name = "gtnh"
+        url = uri("https://nexus.gtnewhorizons.com/repository/public/")
+        content {
+            includeGroup 'com.github.bsideup.jabel'
+        }
+    }
     mavenCentral()
 }
 
 dependencies {
+    annotationProcessor 'com.github.bsideup.jabel:jabel-javac-plugin:1.0.1'
+    compileOnly 'com.github.bsideup.jabel:jabel-javac-plugin:1.0.1'
+
     antlr "org.antlr:antlr4:4.13.2"
     implementation 'org.anarres:jcpp:1.4.14'
 
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(8)
+        vendor = JvmVendorSpec.AZUL
+    }
+}
+
+configure([tasks.compileJava]) {
+    sourceCompatibility = 17
+    options.release = 8
+
+    javaCompiler = javaToolchains.compilerFor {
+        languageVersion = JavaLanguageVersion.of(17)
+        vendor = JvmVendorSpec.AZUL
+    }
 }
 
 generateGrammarSource {
