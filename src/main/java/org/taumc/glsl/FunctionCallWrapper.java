@@ -18,21 +18,6 @@ public class FunctionCallWrapper extends GLSLParserBaseListener {
         this.code = code;
     }
 
-//    @Override
-//    public void enterFunction_call_generic(GLSLParser.Function_call_genericContext ctx) {
-//        String function = ctx.getText();
-//        if (function.startsWith(name + "(")) {
-//            function = code + "(" + function + ")";
-//            GLSLLexer lexer = new GLSLLexer(CharStreams.fromString(function));
-//            GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
-//            var def = parser.function_call_generic();
-//            var parent = ctx.getParent();
-//            def.setParent(parent);
-//            parent.children.set(parent.children.indexOf(ctx), def);
-//        }
-//    }
-
-
     @Override
     public void enterPostfix_expression(GLSLParser.Postfix_expressionContext ctx) {
         String function = ctx.getText();

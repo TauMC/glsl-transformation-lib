@@ -44,6 +44,7 @@ public class Main {
         Util.removeUnusedFunctions(translationUnit);
         Util.rewriteStructArrays(translationUnit);
         Util.renameFunctionCall(translationUnit, "texture2D", "texture");
+        Util.replaceExpression(translationUnit, "gl_TextureMatrix[0]", "mat4(1.0f)");
 
         System.out.println(getFormattedShader(translationUnit));
 

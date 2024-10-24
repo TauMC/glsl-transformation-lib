@@ -89,7 +89,7 @@ void main() {
     }
     const float test = _vert_init(vec2(1,1));
 
-    if (vartest > test) {
+    if (vartest > gl_TextureMatrix[0][3]) {
         test = 4;
     }
 

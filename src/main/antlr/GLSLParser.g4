@@ -396,6 +396,7 @@ type_specifier_nonarray
     | IIMAGE2DMSARRAY
     | UIMAGE2DMSARRAY
     | TEXTURE2D // embeddedt: make texture2D a valid type name for now, so texture2D(t, v) is valid input
+    | TEXTURE3D // ferriarnus: make texture3D a valid type name for now, so texture3D(t, v) is valid input
     | struct_specifier
     | type_name
     ;

@@ -28,6 +28,22 @@ public class ReplaceExpression extends GLSLParserBaseListener {
             expr.parent = ctx.getParent();
             int i = ctx.getParent().children.indexOf(ctx);
             ctx.getParent().children.set(i, expr);
+        } else if (ctx.getText().startsWith(oldExpression.getText())) {
+            if (ctx.unary_expression() != null) {
+                if (ctx.unary_expression().postfix_expression() != null) {
+                    if (ctx.unary_expression().postfix_expression().postfix_expression() != null) {
+                        if (ctx.unary_expression().postfix_expression().postfix_expression().getText().equals(oldExpression.getText())) {
+                            GLSLLexer lexer = new GLSLLexer(CharStreams.fromString(newExpression));
+                            GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
+                            var expr = parser.postfix_expression();
+                            expr.parent = ctx.unary_expression().postfix_expression();
+                            int i = ctx.unary_expression().postfix_expression().children.indexOf(ctx.unary_expression().postfix_expression().postfix_expression());
+                            ctx.unary_expression().postfix_expression().children.set(i, expr);
+                        }
+                    }
+
+                }
+            }
         }
     }
 
