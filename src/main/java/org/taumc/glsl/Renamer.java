@@ -38,4 +38,11 @@ public class Renamer extends GLSLParserBaseListener {
             handleIdentifier(ctx.IDENTIFIER());
         }
     }
+
+    @Override
+    public void enterFunction_prototype(GLSLParser.Function_prototypeContext ctx) {
+        if(ctx.IDENTIFIER() != null) {
+            handleIdentifier(ctx.IDENTIFIER());
+        }
+    }
 }
