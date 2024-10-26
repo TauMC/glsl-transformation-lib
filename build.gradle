@@ -2,10 +2,12 @@ plugins {
     id 'antlr'
     id 'java-library'
     id 'maven-publish'
+    id "com.cinnober.gradle.semver-git" version "3.0.0" apply false
 }
 
 group = 'org.taumc'
-version = '1.0-SNAPSHOT'
+ext.snapshotSuffix = '<count>.g<sha>'
+apply plugin: 'com.cinnober.gradle.semver-git'
 
 repositories {
     maven {
