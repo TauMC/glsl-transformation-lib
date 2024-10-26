@@ -126,7 +126,11 @@ public class Util {
     }
 
     public static void renameFunctionCall(GLSLParser.Translation_unitContext root, String oldName, String newName) {
-        ParseTreeWalker.DEFAULT.walk(new ExpressionRenamer(Collections.singletonMap(oldName, newName)), root);
+        renameFunctionCall(root, Collections.singletonMap(oldName, newName));
+    }
+
+    public static void renameFunctionCall(GLSLParser.Translation_unitContext root, Map<String, String> names) {
+        ParseTreeWalker.DEFAULT.walk(new ExpressionRenamer(names), root);
     }
 
     public static void renameAndWrapShadow(GLSLParser.Translation_unitContext root, String oldName, String newName) {
