@@ -31,9 +31,4 @@ public class FunctionCallWrapper extends GLSLParserBaseListener {
             parent.children.set(parent.children.indexOf(ctx), def);
         }
     }
-
-    @Override
-    public void enterFunction_call(GLSLParser.Function_callContext ctx) {
-        super.enterFunction_call(ctx);
-    }
 }
