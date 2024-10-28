@@ -161,7 +161,7 @@ public class Transformer {
         }
     }
 
-    public void removeUnusedFunctions(GLSLParser.Translation_unitContext root) {
+    public void removeUnusedFunctions() {
         List<String> result = collectFunctions(root);
         Set<String> usedIdentifiers = new HashSet<>();
         FastTreeWalker.walk(new IdentifierCollector(id -> {
@@ -175,7 +175,7 @@ public class Transformer {
         }
     }
 
-    public Map<String, List<String>> findConstParameter(GLSLParser.Translation_unitContext root) {
+    public Map<String, List<String>> findConstParameter() {
         Map<String, List<String>> functions = new HashMap<>();
         ParseTreeWalker.DEFAULT.walk(new ConstParameterFinder(functions), root);
         return functions;
@@ -187,8 +187,8 @@ public class Transformer {
         }
     }
 
-    public void removeConstAssignment(GLSLParser.Translation_unitContext root) {
-        Map<String, List<String>> functions = findConstParameter(root);
+    public void removeConstAssignment() {
+        Map<String, List<String>> functions = findConstParameter();
         removeConstAssignment(functions);
     }
 
@@ -217,7 +217,7 @@ public class Transformer {
         return atomicBoolean.get();
     }
 
-    public void rewriteStructArrays(GLSLParser.Translation_unitContext root) {
+    public void rewriteStructArrays() {
         ParseTreeWalker.DEFAULT.walk(new StructArrayRewriter(), root);
     }
 
