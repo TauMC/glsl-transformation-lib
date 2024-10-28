@@ -221,4 +221,10 @@ public class Transformer {
         ParseTreeWalker.DEFAULT.walk(new StructArrayRewriter(), root);
     }
 
+    public List<TerminalNode> collectStorage() {
+        List<TerminalNode> tokens = new ArrayList<>();
+        ParseTreeWalker.DEFAULT.walk(new StorageCollector(tokens), root);
+        return tokens;
+    }
+
 }
