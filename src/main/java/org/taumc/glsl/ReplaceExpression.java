@@ -2,6 +2,7 @@ package org.taumc.glsl;
 
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
+import org.antlr.v4.runtime.ParserRuleContext;
 import org.taumc.glsl.grammar.GLSLLexer;
 import org.taumc.glsl.grammar.GLSLParser;
 import org.taumc.glsl.grammar.GLSLParserBaseListener;
@@ -32,16 +33,23 @@ public class ReplaceExpression extends GLSLParserBaseListener {
             if (ctx.unary_expression() != null) {
                 if (ctx.unary_expression().postfix_expression() != null) {
                     if (ctx.unary_expression().postfix_expression().postfix_expression() != null) {
-                        if (ctx.unary_expression().postfix_expression().postfix_expression().getText().equals(oldExpression.getText())) {
+                        var postfix = ctx.unary_expression().postfix_expression().postfix_expression();
+                        while (postfix.getText().startsWith(oldExpression.getText()) && !postfix.getText().equals(oldExpression.getText())) {
+                            if (postfix.postfix_expression() != null) {
+                                postfix = postfix.postfix_expression();
+                            } else {
+                                break;
+                            }
+                        }
+                        if (postfix.getText().equals(oldExpression.getText())) {
                             GLSLLexer lexer = new GLSLLexer(CharStreams.fromString(newExpression));
                             GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
                             var expr = parser.postfix_expression();
-                            expr.parent = ctx.unary_expression().postfix_expression();
-                            int i = ctx.unary_expression().postfix_expression().children.indexOf(ctx.unary_expression().postfix_expression().postfix_expression());
-                            ctx.unary_expression().postfix_expression().children.set(i, expr);
+                            expr.parent = postfix.getParent();
+                            int i = postfix.getParent().children.indexOf(postfix);
+                            postfix.getParent().children.set(i, expr);
                         }
                     }
-
                 }
             }
         }
