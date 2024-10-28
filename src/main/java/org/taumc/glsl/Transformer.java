@@ -13,6 +13,7 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public class Transformer {
@@ -124,8 +125,21 @@ public class Transformer {
         ParseTreeWalker.DEFAULT.walk(new ArrayExpressionRewriteListener(Collections.singletonMap(oldName, newName), found), root);
     }
 
+    /**
+     * Mutate the underlying tree directly. All caches will be invalidated after your mutations, so this
+     * should only be used in cases where no better transform is built-in.
+     * @param contextConsumer a consumer that accepts the tree
+     */
+    public void mutateTree(Consumer<GLSLParser.Translation_unitContext> contextConsumer) {
+        contextConsumer.accept(root);
+    }
+
     public void renameFunctionCall(String oldName, String newName) {
-        ParseTreeWalker.DEFAULT.walk(new ExpressionRenamer(Collections.singletonMap(oldName, newName)), root);
+        renameFunctionCall(Collections.singletonMap(oldName, newName));
+    }
+
+    public void renameFunctionCall(Map<String, String> names) {
+        ParseTreeWalker.DEFAULT.walk(new ExpressionRenamer(names), root);
     }
 
     public void renameAndWrapShadow(String oldName, String newName) {
