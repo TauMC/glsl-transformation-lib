@@ -1,9 +1,12 @@
 package org.taumc.glsl;
 
+import com.ibm.icu.impl.CollectionSet;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonToken;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.ParserRuleContext;
+import org.antlr.v4.runtime.RuleContext;
+import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
 import org.antlr.v4.runtime.tree.TerminalNode;
 import org.taumc.glsl.grammar.GLSLLexer;
@@ -19,9 +22,34 @@ import java.util.stream.Collectors;
 public class Transformer {
 
     private final GLSLParser.Translation_unitContext root;
+    private final List<GLSLParser.Function_definitionContext> functionDefinitions;
+    private final List<GLSLParser.Postfix_expressionContext> postfixExpressions;
+    private final List<GLSLParser.Assignment_expressionContext> assignmentExpressions;
+    private final List<GLSLParser.Variable_identifierContext> variableIdentifiers;
+    private final List<GLSLParser.Parameter_declarationContext> parameterDeclarations;
+    private final List<GLSLParser.Typeless_declarationContext> typelessDeclarations;
+    private final List<GLSLParser.Function_prototypeContext> functionPrototypes;
+    private final List<GLSLParser.Binary_expressionContext> binaryExpressions;
+    private final List<GLSLParser.Storage_qualifierContext> storageQualifiers;
+    private final List<GLSLParser.Struct_declarationContext> structDeclarations;
+    private final List<GLSLParser.Single_declarationContext> singleDeclarations;
+    private final List<GLSLParser.Type_specifier_nonarrayContext> textures;
 
     public Transformer(GLSLParser.Translation_unitContext root) {
         this.root = root;
+        this.functionDefinitions = new ArrayList<>();
+        this.postfixExpressions = new ArrayList<>();
+        this.assignmentExpressions = new ArrayList<>();
+        this.variableIdentifiers = new ArrayList<>();
+        this.parameterDeclarations = new ArrayList<>();
+        this.typelessDeclarations = new ArrayList<>();
+        this.functionPrototypes = new ArrayList<>();
+        this.binaryExpressions = new ArrayList<>();
+        this.storageQualifiers = new ArrayList<>();
+        this.structDeclarations = new ArrayList<>();
+        this.singleDeclarations = new ArrayList<>();
+        this.textures = new ArrayList<>();
+        ParseTreeWalker.DEFAULT.walk(new TransformerCollector(this), root);
     }
 
     /**
@@ -33,15 +61,32 @@ public class Transformer {
         GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
         var insert = parser.external_declaration();
 
-        AtomicReference<GLSLParser.External_declarationContext> ref = new AtomicReference<>();
-        ParseTreeWalker.DEFAULT.walk(new VariableInjector(ref), root);
+        ParserRuleContext left = null;
+        if (!storageQualifiers.isEmpty()) {
+            var parent = storageQualifiers.get(0).getParent();
+            while (!(parent instanceof GLSLParser.External_declarationContext)) {
+                if (parent.getParent() == null) {
+                    break;
+                }
+                parent = parent.getParent();
+            }
+            if (parent instanceof GLSLParser.External_declarationContext list) {
+                left = list;
+            }
+        }
 
-        var left = ref.get();
+        if (left == null){
+            if (functionDefinitions.get(0).getParent() instanceof GLSLParser.External_declarationContext list) {
+                left = list;
+            }
+        }
+
         if (left != null) {
             var parent = left.getParent();
             int i = parent.children.indexOf(left);
             parent.children.add(i, insert);
             insert.setParent(parent);
+            scanNode(insert);
         }
     }
 
@@ -50,15 +95,17 @@ public class Transformer {
         GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
         var insert = parser.external_declaration();
 
-        AtomicReference<GLSLParser.External_declarationContext> ref = new AtomicReference<>();
-        ParseTreeWalker.DEFAULT.walk(new FunctionInjector(ref), root);
+        ParserRuleContext left = null;
+        if (functionDefinitions.get(0).getParent() instanceof GLSLParser.External_declarationContext list) {
+            left = list;
+        }
 
-        var left = ref.get();
         if (left != null) {
             var parent = left.getParent();
             int i = parent.children.indexOf(left);
             parent.children.add(i, insert);
             insert.setParent(parent);
+            scanNode(insert);
         }
     }
 
@@ -67,62 +114,219 @@ public class Transformer {
     }
 
     public void rename(Map<String, String> names) {
-        ParseTreeWalker.DEFAULT.walk(new Renamer(names), root);
-    }
-
-    public void replaceExpression(String oldCode, String newCode) {
-        ParseTreeWalker.DEFAULT.walk(new ReplaceExpression(oldCode, newCode), root);
-    }
-
-    public void prependMain(String code) {
-        ParseTreeWalker.DEFAULT.walk(new PrependFunction("main", code), root);
-    }
-
-    public void removeVariable(String code) {
-        AtomicReference<ParserRuleContext> top = new AtomicReference<>();
-        ParseTreeWalker.DEFAULT.walk(new RemoveVariable(code, top), root);
-        if (top.get() != null) {
-            if (top.get().getParent() instanceof GLSLParser.Init_declarator_listContext listContext) {
-                int i = listContext.children.indexOf(top.get());
-                listContext.children.remove(i-1);
-                listContext.children.remove(i-1);
-            } else if (top.get().parent instanceof GLSLParser.Single_declarationContext singleContext) {
-                singleContext.getParent().getParent().getParent().getParent().children.remove(singleContext.getParent().getParent().getParent());
+        List<TerminalNode> nodes = new ArrayList<>();
+        nodes.addAll(typelessDeclarations.stream().map(GLSLParser.Typeless_declarationContext::IDENTIFIER).collect(Collectors.toList()));
+        nodes.addAll(variableIdentifiers.stream().map(GLSLParser.Variable_identifierContext::IDENTIFIER).collect(Collectors.toList()));
+        nodes.addAll(functionPrototypes.stream().map(GLSLParser.Function_prototypeContext::IDENTIFIER).collect(Collectors.toList()));
+        for (var node : nodes) {
+            Token token = node.getSymbol();
+            if(token instanceof CommonToken cToken) {
+                String replacement = names.get(cToken.getText());
+                if(replacement != null) {
+                    cToken.setText(replacement);
+                }
             }
         }
     }
 
+    public void replaceExpression(String oldCode, String newCode) {
+        GLSLLexer oldLexer = new GLSLLexer(CharStreams.fromString(oldCode));
+        GLSLParser oldParser = new GLSLParser(new CommonTokenStream(oldLexer));
+        GLSLLexer newLexer = new GLSLLexer(CharStreams.fromString(newCode));
+        GLSLParser newParser = new GLSLParser(new CommonTokenStream(newLexer));
+        var oldExpression = oldParser.binary_expression();
+        for (var ctx : binaryExpressions) {
+            if (ctx.getText().equals(oldExpression.getText())) {
+                replaceNode(ctx, newParser.binary_expression());
+            } else if (ctx.getText().startsWith(oldExpression.getText())) {
+                if (ctx.unary_expression() != null) {
+                    if (ctx.unary_expression().postfix_expression() != null) {
+                        if (ctx.unary_expression().postfix_expression().postfix_expression() != null) {
+                            var postfix = ctx.unary_expression().postfix_expression().postfix_expression();
+                            while (postfix.getText().startsWith(oldExpression.getText()) && !postfix.getText().equals(oldExpression.getText())) {
+                                if (postfix.postfix_expression() != null) {
+                                    postfix = postfix.postfix_expression();
+                                } else {
+                                    break;
+                                }
+                            }
+                            if (postfix.getText().equals(oldExpression.getText())) {
+                                replaceNode(postfix, newParser.unary_expression());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void replaceNode(ParserRuleContext oldNode, ParserRuleContext newNode) {
+        scanNode(newNode);
+        newNode.parent = oldNode.getParent();
+        int i = oldNode.getParent().children.indexOf(oldNode);
+        oldNode.getParent().children.set(i, newNode);
+        removeNode(oldNode);
+    }
+
+    private void removeNode(ParserRuleContext node) {
+        ParseTreeWalker.DEFAULT.walk(new TransformerRemover(this), node);
+    }
+
+    private void scanNode(ParserRuleContext node) {
+        ParseTreeWalker.DEFAULT.walk(new TransformerCollector(this), node);
+    }
+
+    public void prependMain(String code) {
+        GLSLLexer lexer = new GLSLLexer(CharStreams.fromString(code));
+        GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
+        var insert = parser.statement();
+        for (var ctx : functionDefinitions) {
+            if (ctx.function_prototype().IDENTIFIER().getText().equals("main")) {
+                ctx.compound_statement_no_new_scope().statement_list().children.add(0, insert);
+                scanNode(insert);
+            }
+        }
+    }
+
+    public void removeVariable(String code) {
+        ParserRuleContext typeless = null;
+        for (var ctx : typelessDeclarations) {
+            if (ctx.IDENTIFIER() != null) {
+                Token token = ctx.IDENTIFIER().getSymbol();
+                if(token instanceof CommonToken cToken) {
+                    if(code.equals(cToken.getText())) {
+                        if (ctx.getParent() instanceof GLSLParser.Single_declarationContext) {
+                            if (ctx.getParent().getParent() instanceof GLSLParser.Init_declarator_listContext list) {
+                                if (!list.typeless_declaration().isEmpty()) {
+                                    var entry = list.typeless_declaration(0);
+                                    cToken.setText(entry.getText());
+                                    typeless = entry;
+                                    break;
+                                } else {
+                                    typeless = ctx;
+                                }
+                            }
+                        }
+                        else if (ctx.getParent() instanceof GLSLParser.Init_declarator_listContext) {
+                            typeless = ctx;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (typeless == null) {
+            return;
+        }
+
+        if (typeless.getParent() instanceof GLSLParser.Init_declarator_listContext listContext) {
+            int i = listContext.children.indexOf(typeless);
+            removeNode((ParserRuleContext) listContext.children.remove(i-1));
+            removeNode((ParserRuleContext) listContext.children.remove(i-1));
+        } else if (typeless.parent instanceof GLSLParser.Single_declarationContext singleContext) {
+            ParserRuleContext node = singleContext.getParent().getParent().getParent();
+            node.getParent().children.remove(node);
+            removeNode(node);
+        }
+    }
+
     public int findType(String code) {
-        AtomicInteger type = new AtomicInteger();
-        FastTreeWalker.walk(new TypeFinder(code, type), root);
-        return type.get();
+        for (var ctx : singleDeclarations) {
+            if (ctx.typeless_declaration() == null) {
+                return 0;
+            }
+            if (ctx.typeless_declaration().IDENTIFIER().getSymbol() instanceof CommonToken cToken) {
+                if (cToken.getText().equals(code)) {
+                    if (ctx.fully_specified_type().type_specifier().type_specifier_nonarray().getChild(0) instanceof TerminalNode node) {
+                        if (node.getSymbol() instanceof CommonToken t) {
+                            return t.getType();
+                        }
+                    }
+                }
+            }
+            if (ctx.getParent() instanceof GLSLParser.Init_declarator_listContext listContext) {
+                for (var entry : listContext.typeless_declaration()) {
+                    if (entry.IDENTIFIER().getSymbol() instanceof CommonToken cToken) {
+                        if (cToken.getText().equals(code)) {
+                            if (ctx.fully_specified_type().type_specifier().type_specifier_nonarray().getChild(0) instanceof TerminalNode node) {
+                                if (node.getSymbol() instanceof CommonToken t) {
+                                    return t.getType();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return 0;
     }
 
     public void appendMain(String code) {
-        ParseTreeWalker.DEFAULT.walk(new AppendFunction("main", code), root);
+        GLSLLexer lexer = new GLSLLexer(CharStreams.fromString(code));
+        GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
+        var insert = parser.statement();
+        for (var ctx : functionDefinitions) {
+            if (ctx.function_prototype().IDENTIFIER().getText().equals("main")) {
+                ctx.compound_statement_no_new_scope().statement_list().children.add(insert);
+                scanNode(insert);
+            }
+        }
     }
 
     public boolean containsCall(String name) {
-        AtomicBoolean atomicBoolean = new AtomicBoolean(false);
-        FastTreeWalker.walk(new IdentifierCollector(id -> {
-            if(id.equals(name)) {
-                atomicBoolean.set(true);
-                return false;
-            } else {
-                return true;
+        for (var ctx : variableIdentifiers) {
+            if (ctx.IDENTIFIER().getSymbol() instanceof CommonToken cToken) {
+                if (cToken.getText().equals(name)) {
+                    return true;
+                }
             }
-        }), root);
-        return atomicBoolean.get();
+        }
+        return false;
     }
 
     public boolean hasVariable(String name) {
-        AtomicBoolean atomicBoolean = new AtomicBoolean(false);
-        ParseTreeWalker.DEFAULT.walk(new HasVariable(name, atomicBoolean), root);
-        return atomicBoolean.get();
+        List<TerminalNode> nodes = new ArrayList<>();
+        nodes.addAll(typelessDeclarations.stream().map(GLSLParser.Typeless_declarationContext::IDENTIFIER).collect(Collectors.toList()));
+        nodes.addAll(functionPrototypes.stream().map(GLSLParser.Function_prototypeContext::IDENTIFIER).collect(Collectors.toList()));
+        for (var node : nodes) {
+            Token token = node.getSymbol();
+            if(token instanceof CommonToken cToken) {
+                if (name.equals(cToken.getText())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public void renameArray(String oldName, String newName, Set<Integer> found) {
-        ParseTreeWalker.DEFAULT.walk(new ArrayExpressionRewriteListener(Collections.singletonMap(oldName, newName), found), root);
+        renameArray(Collections.singletonMap(oldName, newName), found);
+    }
+
+    public void renameArray(Map<String, String> replacements, Set<Integer> found) {
+        for (var ctx : postfixExpressions) {
+            if (ctx.postfix_expression() == null) {
+                return;
+            }
+            if (ctx.postfix_expression().primary_expression() == null) {
+                return;
+            }
+            if (ctx.postfix_expression().primary_expression().variable_identifier() == null) {
+                return;
+            }
+            if (ctx.postfix_expression().primary_expression().variable_identifier().IDENTIFIER().getSymbol() instanceof CommonToken cToken) {
+                String replacement = replacements.get(cToken.getText());
+                if(replacement != null && ctx.integer_expression() != null) {
+                    String i = ctx.integer_expression().getText();
+                    found.add(Integer.parseInt(i));
+                    cToken.setText(replacement + i);
+                    ctx.removeLastChild();
+                    ctx.removeLastChild();
+                    ctx.removeLastChild();
+                }
+            }
+        }
     }
 
     /**
@@ -139,35 +343,54 @@ public class Transformer {
     }
 
     public void renameFunctionCall(Map<String, String> names) {
-        ParseTreeWalker.DEFAULT.walk(new ExpressionRenamer(names), root);
+        List<TerminalNode> nodes = new ArrayList<>();
+        nodes.addAll(typelessDeclarations.stream().map(GLSLParser.Typeless_declarationContext::IDENTIFIER).collect(Collectors.toList()));
+        nodes.addAll(variableIdentifiers.stream().map(GLSLParser.Variable_identifierContext::IDENTIFIER).collect(Collectors.toList()));
+        nodes.addAll(textures.stream().map(c -> {
+            if (c.TEXTURE2D() != null) {
+                return c.TEXTURE2D();
+            } else {
+                return c.TEXTURE3D();
+            }
+        }).collect(Collectors.toList()));
+        for (var node : nodes) {
+            Token token = node.getSymbol();
+            if(token instanceof CommonToken cToken) {
+                String replacement = names.get(cToken.getText());
+                if(replacement != null) {
+                    cToken.setText(replacement);
+                }
+            }
+        }
     }
 
     public void renameAndWrapShadow(String oldName, String newName) {
-        ParseTreeWalker.DEFAULT.walk( new FunctionCallWrapper(oldName, "vec4"), root);
+        for (var ctx : postfixExpressions) {
+            String function = ctx.getText();
+            if (ctx.function_call_parameters() != null && function.startsWith(oldName + "(")) {
+                function = "vec4" + "(" + function + ")";
+                GLSLLexer lexer = new GLSLLexer(CharStreams.fromString(function));
+                GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
+                var def = parser.postfix_expression();
+                replaceNode(ctx, def);
+            }
+        }
         renameFunctionCall(oldName, newName);
     }
 
-    public List<String> collectFunctions(GLSLParser.Translation_unitContext root) {
-        List<String> result = new ArrayList<>();
-        ParseTreeWalker.DEFAULT.walk(new FunctionCollector(result), root);
-        return result;
-    }
-
     public void removeFunction(String name) {
-        AtomicReference<GLSLParser.External_declarationContext> context = new AtomicReference<>();
-        FastTreeWalker.walk(new FunctionRemover(name, context), root);
-        if (context.get() != null) {
-            context.get().getParent().children.remove(context.get());
+        for (var ctx : functionPrototypes) {
+            if (ctx.IDENTIFIER().getText().equals(name)) {
+                if (ctx.getParent().getParent() instanceof GLSLParser.External_declarationContext declarationContext) {
+                    removeNode(declarationContext);
+                }
+            }
         }
     }
 
     public void removeUnusedFunctions() {
-        List<String> result = collectFunctions(root);
-        Set<String> usedIdentifiers = new HashSet<>();
-        FastTreeWalker.walk(new IdentifierCollector(id -> {
-            usedIdentifiers.add(id);
-            return true;
-        }), root);
+        List<String> result = functionPrototypes.stream().map(c -> c.IDENTIFIER().getText()).collect(Collectors.toList());
+        List<String> usedIdentifiers = variableIdentifiers.stream().map(c -> c.IDENTIFIER().getText()).collect(Collectors.toList());
         List<String> functionsToRemove = result.stream().filter(name -> !usedIdentifiers.contains(name) && !name.equals("main")).collect(Collectors.toList());
         // TODO - remove all the functions in one walk of the tree
         for (String name : functionsToRemove) {
@@ -177,13 +400,67 @@ public class Transformer {
 
     public Map<String, List<String>> findConstParameter() {
         Map<String, List<String>> functions = new HashMap<>();
-        ParseTreeWalker.DEFAULT.walk(new ConstParameterFinder(functions), root);
+        for (var ctx : parameterDeclarations) {
+            GLSLParser.Type_qualifierContext typeQualifierContext = ctx.type_qualifier();
+            if (typeQualifierContext == null) {
+                continue;
+            }
+            GLSLParser.Single_type_qualifierContext singleTypeQualifierContext = typeQualifierContext.single_type_qualifier(0);
+            if (singleTypeQualifierContext == null) {
+                continue;
+            }
+            GLSLParser.Storage_qualifierContext storageQualifierContext = singleTypeQualifierContext.storage_qualifier();
+            if (storageQualifierContext != null && storageQualifierContext.CONST() != null) {
+                if (ctx.getParent().getParent() instanceof GLSLParser.Function_prototypeContext proto) {
+                    if (functions.containsKey(proto.IDENTIFIER().getText())) {
+                        functions.get(proto.IDENTIFIER().getText()).add(ctx.parameter_declarator().IDENTIFIER().getText());
+
+                    } else {
+                        List<String> params = new ArrayList<>();
+                        params.add(ctx.parameter_declarator().IDENTIFIER().getText());
+                        functions.put(proto.IDENTIFIER().getText(), params);
+                    }
+                }
+            }
+        }
         return functions;
     }
 
     public void removeConstAssignment(Map<String, List<String>> functions) {
         for (Map.Entry<String, List<String>> entry : functions.entrySet()) {
-            ParseTreeWalker.DEFAULT.walk(new ConstAssignmentRemover(entry.getKey(), entry.getValue()), root);
+            for (var ctx : variableIdentifiers) {
+                if (entry.getValue().contains(ctx.IDENTIFIER().getText())) {
+                    var parent = ctx.getParent();
+                    while (!(parent instanceof GLSLParser.Function_definitionContext definitionContext)) {
+                        parent = parent.getParent();
+                        if (parent == null) {
+                            return;
+                        }
+                    }
+
+                    if (definitionContext.function_prototype().IDENTIFIER().getText().equals(entry.getKey())) {
+                        parent = ctx.getParent();
+                        while (!(parent instanceof GLSLParser.Single_declarationContext declarationContext)) {
+                            parent = parent.getParent();
+                            if (parent == null) {
+                                return;
+                            }
+                        }
+
+                        entry.getValue().add(declarationContext.typeless_declaration().IDENTIFIER().getText());
+
+                        GLSLParser.Type_qualifierContext typeQualifierContext = declarationContext.fully_specified_type().type_qualifier();
+                        if (typeQualifierContext == null || typeQualifierContext.single_type_qualifier(0) == null) {
+                            return;
+                        }
+                        GLSLParser.Storage_qualifierContext storageQualifierContext = typeQualifierContext.single_type_qualifier(0).storage_qualifier();
+                        if (storageQualifierContext != null && storageQualifierContext.CONST() != null) {
+                            declarationContext.fully_specified_type().children.remove(typeQualifierContext);
+                            removeNode(typeQualifierContext);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -206,25 +483,158 @@ public class Transformer {
     }
 
     public Map<String, GLSLParser.Single_declarationContext> findQualifiers(int type) {
-        Map<String, GLSLParser.Single_declarationContext> result = new HashMap<>();
-        ParseTreeWalker.DEFAULT.walk(new QualifierFinder(type, result), root);
-        return result;
+        Map<String, GLSLParser.Single_declarationContext> nodes = new HashMap<>();
+        mainLoop:
+        for (var ctx : storageQualifiers) {
+            if (ctx.children.get(0) instanceof TerminalNode node &&
+                    node.getSymbol() instanceof CommonToken token &&
+                    token.getType() == type) {
+                var parent = node.getParent();
+                while (!(parent instanceof GLSLParser.Single_declarationContext declarationContext)) {
+                    parent = parent.getParent();
+                    if (parent == null) {
+                        continue mainLoop;
+                    }
+                }
+
+                nodes.put(declarationContext.typeless_declaration().IDENTIFIER().getText(), declarationContext);
+
+                if (declarationContext.getParent() instanceof GLSLParser.Init_declarator_listContext listContext) {
+                    if (listContext.typeless_declaration() != null) {
+                        for (var entry : listContext.typeless_declaration()) {
+                            nodes.put(entry.IDENTIFIER().getText(), declarationContext);
+                        }
+                    }
+                }
+            }
+        }
+        return nodes;
     }
 
     public boolean hasAssigment(String name) {
-        AtomicBoolean atomicBoolean = new AtomicBoolean(false);
-        ParseTreeWalker.DEFAULT.walk(new AssigmentChecker(name, atomicBoolean), root);
-        return atomicBoolean.get();
+        for (var ctx : assignmentExpressions) {
+            if (ctx.unary_expression() != null && (ctx.unary_expression().getText().startsWith(name) || ctx.unary_expression().getText().startsWith(name + "."))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public void rewriteStructArrays() {
-        ParseTreeWalker.DEFAULT.walk(new StructArrayRewriter(), root);
+        for (var ctx : structDeclarations) {
+            if (ctx.type_specifier().array_specifier() != null) {
+                var array_specifier = ctx.type_specifier().array_specifier();
+                if (array_specifier.dimension().get(0).constant_expression() != null) {
+                    return;
+                }
+                ctx.type_specifier().children.remove(array_specifier);
+                for (var entry : ctx.struct_declarator_list().struct_declarator()) {
+                    array_specifier.setParent(entry);
+                    entry.children.add(array_specifier);
+                }
+            }
+        }
     }
 
     public List<TerminalNode> collectStorage() {
-        List<TerminalNode> tokens = new ArrayList<>();
-        ParseTreeWalker.DEFAULT.walk(new StorageCollector(tokens), root);
-        return tokens;
+        return storageQualifiers.stream().filter(ctx -> ctx.getChild(0) instanceof TerminalNode).map(ctx -> (TerminalNode) ctx.getChild(0)).collect(Collectors.toList());
     }
 
+    //Add
+    public void addFunctionDefinition(GLSLParser.Function_definitionContext ctx) {
+        this.functionDefinitions.add(ctx);
+    }
+
+    public void addPostfix(GLSLParser.Postfix_expressionContext ctx) {
+        this.postfixExpressions.add(ctx);
+    }
+
+    public void addAssignment(GLSLParser.Assignment_expressionContext ctx) {
+        this.assignmentExpressions.add(ctx);
+    }
+
+    public void addVariable(GLSLParser.Variable_identifierContext ctx) {
+        this.variableIdentifiers.add(ctx);
+    }
+
+    public void addParameter(GLSLParser.Parameter_declarationContext ctx) {
+        this.parameterDeclarations.add(ctx);
+    }
+
+    public void addFunctionPrototype(GLSLParser.Function_prototypeContext ctx) {
+        this.functionPrototypes.add(ctx);
+    }
+
+    public void addTypeless(GLSLParser.Typeless_declarationContext ctx) {
+        this.typelessDeclarations.add(ctx);
+    }
+
+    public void addBinary(GLSLParser.Binary_expressionContext ctx) {
+        this.binaryExpressions.add(ctx);
+    }
+
+    public void addStorage(GLSLParser.Storage_qualifierContext ctx) {
+        this.storageQualifiers.add(ctx);
+    }
+
+    public void addStruct(GLSLParser.Struct_declarationContext ctx) {
+        this.structDeclarations.add(ctx);
+    }
+
+    public void addSingle(GLSLParser.Single_declarationContext ctx) {
+        this.singleDeclarations.add(ctx);
+    }
+
+    public void addTexture(GLSLParser.Type_specifier_nonarrayContext ctx) {
+        this.textures.add(ctx);
+    }
+
+    //Remove
+    public void removeFunctionDefinition(GLSLParser.Function_definitionContext ctx) {
+        functionDefinitions.remove(ctx);
+    }
+
+    public void removeFunctionPrototype(GLSLParser.Function_prototypeContext ctx) {
+        functionPrototypes.remove(ctx);
+    }
+
+    public void removeParameter(GLSLParser.Parameter_declarationContext ctx) {
+        parameterDeclarations.remove(ctx);
+    }
+
+    public void removeTypeless(GLSLParser.Typeless_declarationContext ctx) {
+        typelessDeclarations.remove(ctx);
+    }
+
+    public void removeTexture(GLSLParser.Type_specifier_nonarrayContext ctx) {
+        textures.remove(ctx);
+    }
+
+    public void removePostfix(GLSLParser.Postfix_expressionContext ctx) {
+        postfixExpressions.remove(ctx);
+    }
+
+    public void removeAssignment(GLSLParser.Assignment_expressionContext ctx) {
+        assignmentExpressions.remove(ctx);
+    }
+
+    public void removeBinary(GLSLParser.Binary_expressionContext ctx) {
+        binaryExpressions.remove(ctx);
+    }
+
+    public void removeStorage(GLSLParser.Storage_qualifierContext ctx) {
+        storageQualifiers.remove(ctx);
+    }
+
+    public void removeStruct(GLSLParser.Struct_declarationContext ctx) {
+        structDeclarations.remove(ctx);
+    }
+
+    public void removeSingle(GLSLParser.Single_declarationContext ctx) {
+        singleDeclarations.remove(ctx);
+    }
+
+    public void removeVariables(GLSLParser.Variable_identifierContext ctx) {
+        variableIdentifiers.remove(ctx);
+    }
 }

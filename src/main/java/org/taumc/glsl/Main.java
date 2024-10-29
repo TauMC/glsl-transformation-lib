@@ -30,21 +30,23 @@ public class Main {
         parser.setBuildParseTree(true);
         var translationUnit = parser.translation_unit();
 
-        Util.injectVariable(translationUnit, "in ivec2 a_LightCoord2;");
-        Util.rename(translationUnit, "a_Color", "rewritten_Color");
+        Transformer transformer = new Transformer(translationUnit);
+
+        transformer.injectVariable("in ivec2 a_LightCoord2;");
+        transformer.rename("a_Color", "rewritten_Color");
         Set<Integer> found = new HashSet<>();
-        Util.renameArray(translationUnit, "test", "replaced", found);
+        transformer.renameArray("test", "replaced", found);
         //Util.removeVariable(translationUnit, "_vert_tex_diffuse_coord");
-        Util.removeVariable(translationUnit, "testing");
-        Util.removeConstAssignment(translationUnit);
-        Util.renameFunctionCall(translationUnit, "_vert_init", "newCall");
-        Util.renameAndWrapShadow(translationUnit, "function", "wrapped");
-        Util.prependMain(translationUnit, "injected = 5;");
-        Util.replaceExpression(translationUnit, "vartest", "unint(5)");
-        Util.removeUnusedFunctions(translationUnit);
-        Util.rewriteStructArrays(translationUnit);
-        Util.renameFunctionCall(translationUnit, "texture2D", "texture");
-        Util.replaceExpression(translationUnit, "gl_TextureMatrix[0]", "mat4(1.0f)");
+        transformer.removeVariable("testing");
+        transformer.removeConstAssignment();
+        transformer.renameFunctionCall("_vert_init", "newCall");
+        transformer.renameAndWrapShadow("function", "wrapped");
+        transformer.prependMain("injected = 5;");
+        transformer.replaceExpression("vartest", "unint(5)");
+        transformer.removeUnusedFunctions();
+        transformer.rewriteStructArrays();
+        transformer.renameFunctionCall("texture2D", "texture");
+        transformer.replaceExpression("gl_TextureMatrix[0]", "mat4(1.0f)");
 
         System.out.println(getFormattedShader(translationUnit));
 
