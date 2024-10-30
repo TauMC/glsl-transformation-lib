@@ -34,6 +34,8 @@ public class Transformer {
     private final List<GLSLParser.Struct_declarationContext> structDeclarations;
     private final List<GLSLParser.Single_declarationContext> singleDeclarations;
     private final List<GLSLParser.Type_specifier_nonarrayContext> textures;
+    public GLSLParser.External_declarationContext variable = null;
+    public GLSLParser.External_declarationContext function = null;
 
     public Transformer(GLSLParser.Translation_unitContext root) {
         this.root = root;
@@ -61,32 +63,34 @@ public class Transformer {
         GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
         var insert = parser.external_declaration();
 
-        ParserRuleContext left = null;
-        if (!storageQualifiers.isEmpty()) {
-            var parent = storageQualifiers.get(0).getParent();
-            while (!(parent instanceof GLSLParser.External_declarationContext)) {
-                if (parent.getParent() == null) {
-                    break;
+        if (variable == null) {
+            if (!storageQualifiers.isEmpty()) {
+                var parent = storageQualifiers.get(0).getParent();
+                while (!(parent instanceof GLSLParser.External_declarationContext)) {
+                    if (parent.getParent() == null) {
+                        break;
+                    }
+                    parent = parent.getParent();
                 }
-                parent = parent.getParent();
-            }
-            if (parent instanceof GLSLParser.External_declarationContext list) {
-                left = list;
+                if (parent instanceof GLSLParser.External_declarationContext list) {
+                    variable = list;
+                }
             }
         }
 
-        if (left == null){
+        if (variable == null){
             if (functionDefinitions.get(0).getParent() instanceof GLSLParser.External_declarationContext list) {
-                left = list;
+                variable = list;
             }
         }
 
-        if (left != null) {
-            var parent = left.getParent();
-            int i = parent.children.indexOf(left);
+        if (variable != null) {
+            var parent = variable.getParent();
+            int i = parent.children.indexOf(variable);
             parent.children.add(i, insert);
             insert.setParent(parent);
             scanNode(insert);
+            ParseTreeWalker.DEFAULT.walk(new InjectorPoint(this, false), insert);
         }
     }
 
@@ -95,17 +99,19 @@ public class Transformer {
         GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
         var insert = parser.external_declaration();
 
-        ParserRuleContext left = null;
-        if (functionDefinitions.get(0).getParent() instanceof GLSLParser.External_declarationContext list) {
-            left = list;
+        if (function == null) {
+            if (functionDefinitions.get(0).getParent() instanceof GLSLParser.External_declarationContext list) {
+                function = list;
+            }
         }
 
-        if (left != null) {
-            var parent = left.getParent();
-            int i = parent.children.indexOf(left);
+        if (function != null) {
+            var parent = function.getParent();
+            int i = parent.children.indexOf(function);
             parent.children.add(i, insert);
             insert.setParent(parent);
             scanNode(insert);
+            ParseTreeWalker.DEFAULT.walk(new InjectorPoint(this, true), insert);
         }
     }
 
@@ -132,11 +138,12 @@ public class Transformer {
     public void replaceExpression(String oldCode, String newCode) {
         GLSLLexer oldLexer = new GLSLLexer(CharStreams.fromString(oldCode));
         GLSLParser oldParser = new GLSLParser(new CommonTokenStream(oldLexer));
-        GLSLLexer newLexer = new GLSLLexer(CharStreams.fromString(newCode));
-        GLSLParser newParser = new GLSLParser(new CommonTokenStream(newLexer));
         var oldExpression = oldParser.binary_expression();
-        for (var ctx : binaryExpressions) {
+        var binaryExpression = new ArrayList<>(binaryExpressions);
+        for (var ctx : binaryExpression) {
             if (ctx.getText().equals(oldExpression.getText())) {
+                GLSLLexer newLexer = new GLSLLexer(CharStreams.fromString(newCode));
+                GLSLParser newParser = new GLSLParser(new CommonTokenStream(newLexer));
                 replaceNode(ctx, newParser.binary_expression());
             } else if (ctx.getText().startsWith(oldExpression.getText())) {
                 if (ctx.unary_expression() != null) {
@@ -151,6 +158,8 @@ public class Transformer {
                                 }
                             }
                             if (postfix.getText().equals(oldExpression.getText())) {
+                                GLSLLexer newLexer = new GLSLLexer(CharStreams.fromString(newCode));
+                                GLSLParser newParser = new GLSLParser(new CommonTokenStream(newLexer));
                                 replaceNode(postfix, newParser.unary_expression());
                             }
                         }
@@ -190,7 +199,8 @@ public class Transformer {
 
     public void removeVariable(String code) {
         ParserRuleContext typeless = null;
-        for (var ctx : typelessDeclarations) {
+        var typelessDeclaration = new ArrayList<>(this.typelessDeclarations);
+        for (var ctx : typelessDeclaration) {
             if (ctx.IDENTIFIER() != null) {
                 Token token = ctx.IDENTIFIER().getSymbol();
                 if(token instanceof CommonToken cToken) {
@@ -222,8 +232,12 @@ public class Transformer {
 
         if (typeless.getParent() instanceof GLSLParser.Init_declarator_listContext listContext) {
             int i = listContext.children.indexOf(typeless);
-            removeNode((ParserRuleContext) listContext.children.remove(i-1));
-            removeNode((ParserRuleContext) listContext.children.remove(i-1));
+            if (listContext.children.remove(i-1) instanceof ParserRuleContext context) {
+                removeNode(context);
+            }
+            if (listContext.children.remove(i-1) instanceof ParserRuleContext context) {
+                removeNode(context);
+            }
         } else if (typeless.parent instanceof GLSLParser.Single_declarationContext singleContext) {
             ParserRuleContext node = singleContext.getParent().getParent().getParent();
             node.getParent().children.remove(node);
@@ -307,13 +321,13 @@ public class Transformer {
     public void renameArray(Map<String, String> replacements, Set<Integer> found) {
         for (var ctx : postfixExpressions) {
             if (ctx.postfix_expression() == null) {
-                return;
+                continue;
             }
             if (ctx.postfix_expression().primary_expression() == null) {
-                return;
+                continue;
             }
             if (ctx.postfix_expression().primary_expression().variable_identifier() == null) {
-                return;
+                continue;
             }
             if (ctx.postfix_expression().primary_expression().variable_identifier().IDENTIFIER().getSymbol() instanceof CommonToken cToken) {
                 String replacement = replacements.get(cToken.getText());
@@ -344,7 +358,7 @@ public class Transformer {
 
     public void renameFunctionCall(Map<String, String> names) {
         List<TerminalNode> nodes = new ArrayList<>();
-        nodes.addAll(typelessDeclarations.stream().map(GLSLParser.Typeless_declarationContext::IDENTIFIER).collect(Collectors.toList()));
+        nodes.addAll(functionPrototypes.stream().map(GLSLParser.Function_prototypeContext::IDENTIFIER).collect(Collectors.toList()));
         nodes.addAll(variableIdentifiers.stream().map(GLSLParser.Variable_identifierContext::IDENTIFIER).collect(Collectors.toList()));
         nodes.addAll(textures.stream().map(c -> {
             if (c.TEXTURE2D() != null) {
@@ -365,7 +379,8 @@ public class Transformer {
     }
 
     public void renameAndWrapShadow(String oldName, String newName) {
-        for (var ctx : postfixExpressions) {
+        var postfixExpression = new ArrayList<>(postfixExpressions);
+        for (var ctx : postfixExpression) {
             String function = ctx.getText();
             if (ctx.function_call_parameters() != null && function.startsWith(oldName + "(")) {
                 function = "vec4" + "(" + function + ")";
@@ -379,9 +394,11 @@ public class Transformer {
     }
 
     public void removeFunction(String name) {
-        for (var ctx : functionPrototypes) {
+        var functionPrototype = new ArrayList<>(functionPrototypes);
+        for (var ctx : functionPrototype) {
             if (ctx.IDENTIFIER().getText().equals(name)) {
                 if (ctx.getParent().getParent() instanceof GLSLParser.External_declarationContext declarationContext) {
+                    declarationContext.getParent().children.remove(declarationContext);
                     removeNode(declarationContext);
                 }
             }
