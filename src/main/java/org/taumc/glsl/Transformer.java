@@ -115,6 +115,15 @@ public class Transformer {
         }
     }
 
+    public void injectAtEnd(String code) {
+        GLSLLexer lexer = new GLSLLexer(CharStreams.fromString(code));
+        GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
+        var insert = parser.external_declaration();
+
+        root.children.add(insert);
+        scanNode(insert);
+    }
+
     public void rename(String oldName, String newName) {
         rename(Collections.singletonMap(oldName, newName));
     }
