@@ -139,25 +139,27 @@ public class Transformer {
         GLSLLexer oldLexer = new GLSLLexer(CharStreams.fromString(oldCode));
         GLSLParser oldParser = new GLSLParser(new CommonTokenStream(oldLexer));
         var oldExpression = oldParser.binary_expression();
+        String oldText = oldExpression.getText();
         var binaryExpression = new ArrayList<>(binaryExpressions);
         for (var ctx : binaryExpression) {
-            if (ctx.getText().equals(oldExpression.getText())) {
+            String ctxText = ctx.getText();
+            if (ctxText.equals(oldText)) {
                 GLSLLexer newLexer = new GLSLLexer(CharStreams.fromString(newCode));
                 GLSLParser newParser = new GLSLParser(new CommonTokenStream(newLexer));
                 replaceNode(ctx, newParser.binary_expression());
-            } else if (ctx.getText().startsWith(oldExpression.getText())) {
+            } else if (ctxText.startsWith(oldText)) {
                 if (ctx.unary_expression() != null) {
                     if (ctx.unary_expression().postfix_expression() != null) {
                         if (ctx.unary_expression().postfix_expression().postfix_expression() != null) {
                             var postfix = ctx.unary_expression().postfix_expression().postfix_expression();
-                            while (postfix.getText().startsWith(oldExpression.getText()) && !postfix.getText().equals(oldExpression.getText())) {
+                            while (postfix.getText().startsWith(oldText) && !postfix.getText().equals(oldText)) {
                                 if (postfix.postfix_expression() != null) {
                                     postfix = postfix.postfix_expression();
                                 } else {
                                     break;
                                 }
                             }
-                            if (postfix.getText().equals(oldExpression.getText())) {
+                            if (postfix.getText().equals(oldText)) {
                                 GLSLLexer newLexer = new GLSLLexer(CharStreams.fromString(newCode));
                                 GLSLParser newParser = new GLSLParser(new CommonTokenStream(newLexer));
                                 replaceNode(postfix, newParser.unary_expression());
