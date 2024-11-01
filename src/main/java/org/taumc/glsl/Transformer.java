@@ -395,7 +395,7 @@ public class Transformer {
     public void renameAndWrapShadow(String oldName, String newName) {
         var postfixExpression = new ArrayList<>(postfixExpressions);
         for (var cachedExpr : postfixExpression) {
-            String function = cachedExpr.expr().getText();
+            String function = cachedExpr.exprText();
             if (cachedExpr.expr().function_call_parameters() != null && function.startsWith(oldName + "(")) {
                 function = "vec4" + "(" + function + ")";
                 var def = ShaderParser.parseSnippet(function, GLSLParser::postfix_expression);
