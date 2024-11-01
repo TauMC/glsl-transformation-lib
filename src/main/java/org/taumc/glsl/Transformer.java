@@ -10,7 +10,6 @@ import org.antlr.v4.runtime.RuleContext;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
 import org.antlr.v4.runtime.tree.TerminalNode;
-import org.taumc.glsl.grammar.GLSLLexer;
 import org.taumc.glsl.grammar.GLSLParser;
 
 import java.util.*;
@@ -24,13 +23,13 @@ public class Transformer {
 
     private final GLSLParser.Translation_unitContext root;
     private final List<GLSLParser.Function_definitionContext> functionDefinitions;
-    private final List<GLSLParser.Postfix_expressionContext> postfixExpressions;
+    private final List<CachedTextExpression<GLSLParser.Postfix_expressionContext>> postfixExpressions;
     private final List<GLSLParser.Assignment_expressionContext> assignmentExpressions;
     private final List<GLSLParser.Variable_identifierContext> variableIdentifiers;
     private final List<GLSLParser.Parameter_declarationContext> parameterDeclarations;
     private final List<GLSLParser.Typeless_declarationContext> typelessDeclarations;
     private final List<GLSLParser.Function_prototypeContext> functionPrototypes;
-    private final List<CachedBinaryExpression> binaryExpressions;
+    private final List<CachedTextExpression<GLSLParser.Binary_expressionContext>> binaryExpressions;
     private final List<GLSLParser.Storage_qualifierContext> storageQualifiers;
     private final List<GLSLParser.Struct_declarationContext> structDeclarations;
     private final List<GLSLParser.Single_declarationContext> singleDeclarations;
@@ -39,7 +38,7 @@ public class Transformer {
     public GLSLParser.External_declarationContext function = null;
 
     @Desugar
-    private record CachedBinaryExpression(GLSLParser.Binary_expressionContext expr, String exprText) {}
+    private record CachedTextExpression<T>(T expr, String exprText) {}
 
     public Transformer(GLSLParser.Translation_unitContext root) {
         this.root = root;
@@ -63,9 +62,7 @@ public class Transformer {
      * @param code the to inject code
      */
     public void injectVariable(String code) {
-        GLSLLexer lexer = new GLSLLexer(CharStreams.fromString(code));
-        GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
-        var insert = parser.external_declaration();
+        var insert = ShaderParser.parseSnippet(code, GLSLParser::external_declaration);
 
         if (variable == null) {
             if (!storageQualifiers.isEmpty()) {
@@ -99,9 +96,7 @@ public class Transformer {
     }
 
     public void injectFunction(String code) {
-        GLSLLexer lexer = new GLSLLexer(CharStreams.fromString(code));
-        GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
-        var insert = parser.external_declaration();
+        var insert = ShaderParser.parseSnippet(code, GLSLParser::external_declaration);
 
         if (function == null) {
             if (functionDefinitions.get(0).getParent() instanceof GLSLParser.External_declarationContext list) {
@@ -120,9 +115,7 @@ public class Transformer {
     }
 
     public void injectAtEnd(String code) {
-        GLSLLexer lexer = new GLSLLexer(CharStreams.fromString(code));
-        GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
-        var insert = parser.external_declaration();
+        var insert = ShaderParser.parseSnippet(code, GLSLParser::external_declaration);
 
         root.children.add(insert);
         scanNode(insert);
@@ -149,18 +142,14 @@ public class Transformer {
     }
 
     public void replaceExpression(String oldCode, String newCode) {
-        GLSLLexer oldLexer = new GLSLLexer(CharStreams.fromString(oldCode));
-        GLSLParser oldParser = new GLSLParser(new CommonTokenStream(oldLexer));
-        var oldExpression = oldParser.binary_expression();
+        var oldExpression = ShaderParser.parseSnippet(oldCode, GLSLParser::binary_expression);
         String oldText = oldExpression.getText();
         var exprList = new ArrayList<>(binaryExpressions);
         for (var cachedExpr : exprList) {
             String ctxText = cachedExpr.exprText();
             var ctx = cachedExpr.expr();
             if (ctxText.equals(oldText)) {
-                GLSLLexer newLexer = new GLSLLexer(CharStreams.fromString(newCode));
-                GLSLParser newParser = new GLSLParser(new CommonTokenStream(newLexer));
-                replaceNode(ctx, newParser.binary_expression());
+                replaceNode(ctx, ShaderParser.parseSnippet(newCode, GLSLParser::binary_expression));
             } else if (ctxText.startsWith(oldText)) {
                 if (ctx.unary_expression() != null) {
                     if (ctx.unary_expression().postfix_expression() != null) {
@@ -174,9 +163,7 @@ public class Transformer {
                                 }
                             }
                             if (postfix.getText().equals(oldText)) {
-                                GLSLLexer newLexer = new GLSLLexer(CharStreams.fromString(newCode));
-                                GLSLParser newParser = new GLSLParser(new CommonTokenStream(newLexer));
-                                replaceNode(postfix, newParser.unary_expression());
+                                replaceNode(postfix, ShaderParser.parseSnippet(newCode, GLSLParser::unary_expression));
                             }
                         }
                     }
@@ -202,9 +189,7 @@ public class Transformer {
     }
 
     public void prependMain(String code) {
-        GLSLLexer lexer = new GLSLLexer(CharStreams.fromString(code));
-        GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
-        var insert = parser.statement();
+        var insert = ShaderParser.parseSnippet(code, GLSLParser::statement);
         for (var ctx : functionDefinitions) {
             if (ctx.function_prototype().IDENTIFIER().getText().equals("main")) {
                 ctx.compound_statement_no_new_scope().statement_list().children.add(0, insert);
@@ -293,9 +278,7 @@ public class Transformer {
     }
 
     public void appendMain(String code) {
-        GLSLLexer lexer = new GLSLLexer(CharStreams.fromString(code));
-        GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
-        var insert = parser.statement();
+        var insert = ShaderParser.parseSnippet(code, GLSLParser::statement);
         for (var ctx : functionDefinitions) {
             if (ctx.function_prototype().IDENTIFIER().getText().equals("main")) {
                 ctx.compound_statement_no_new_scope().statement_list().children.add(insert);
@@ -335,7 +318,8 @@ public class Transformer {
     }
 
     public void renameArray(Map<String, String> replacements, Set<Integer> found) {
-        for (var ctx : postfixExpressions) {
+        for (var cachedExpr : postfixExpressions) {
+            var ctx = cachedExpr.expr();
             if (ctx.postfix_expression() == null) {
                 continue;
             }
@@ -396,14 +380,12 @@ public class Transformer {
 
     public void renameAndWrapShadow(String oldName, String newName) {
         var postfixExpression = new ArrayList<>(postfixExpressions);
-        for (var ctx : postfixExpression) {
-            String function = ctx.getText();
-            if (ctx.function_call_parameters() != null && function.startsWith(oldName + "(")) {
+        for (var cachedExpr : postfixExpression) {
+            String function = cachedExpr.expr().getText();
+            if (cachedExpr.expr().function_call_parameters() != null && function.startsWith(oldName + "(")) {
                 function = "vec4" + "(" + function + ")";
-                GLSLLexer lexer = new GLSLLexer(CharStreams.fromString(function));
-                GLSLParser parser = new GLSLParser(new CommonTokenStream(lexer));
-                var def = parser.postfix_expression();
-                replaceNode(ctx, def);
+                var def = ShaderParser.parseSnippet(function, GLSLParser::postfix_expression);
+                replaceNode(cachedExpr.expr(), def);
             }
         }
         renameFunctionCall(oldName, newName);
@@ -579,7 +561,7 @@ public class Transformer {
     }
 
     public void addPostfix(GLSLParser.Postfix_expressionContext ctx) {
-        this.postfixExpressions.add(ctx);
+        this.postfixExpressions.add(new CachedTextExpression<>(ctx, ctx.getText()));
     }
 
     public void addAssignment(GLSLParser.Assignment_expressionContext ctx) {
@@ -603,7 +585,7 @@ public class Transformer {
     }
 
     public void addBinary(GLSLParser.Binary_expressionContext ctx) {
-        this.binaryExpressions.add(new CachedBinaryExpression(ctx, ctx.getText()));
+        this.binaryExpressions.add(new CachedTextExpression<>(ctx, ctx.getText()));
     }
 
     public void addStorage(GLSLParser.Storage_qualifierContext ctx) {
@@ -644,7 +626,7 @@ public class Transformer {
     }
 
     public void removePostfix(GLSLParser.Postfix_expressionContext ctx) {
-        postfixExpressions.remove(ctx);
+        postfixExpressions.remove(new CachedTextExpression<>(ctx, ctx.getText()));
     }
 
     public void removeAssignment(GLSLParser.Assignment_expressionContext ctx) {
@@ -652,7 +634,7 @@ public class Transformer {
     }
 
     public void removeBinary(GLSLParser.Binary_expressionContext ctx) {
-        binaryExpressions.remove(ctx);
+        binaryExpressions.remove(new CachedTextExpression<>(ctx, ctx.getText()));
     }
 
     public void removeStorage(GLSLParser.Storage_qualifierContext ctx) {
