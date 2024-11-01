@@ -1,5 +1,6 @@
 package org.taumc.glsl;
 
+import com.github.bsideup.jabel.Desugar;
 import com.ibm.icu.impl.CollectionSet;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonToken;
@@ -29,13 +30,16 @@ public class Transformer {
     private final List<GLSLParser.Parameter_declarationContext> parameterDeclarations;
     private final List<GLSLParser.Typeless_declarationContext> typelessDeclarations;
     private final List<GLSLParser.Function_prototypeContext> functionPrototypes;
-    private final List<GLSLParser.Binary_expressionContext> binaryExpressions;
+    private final List<CachedBinaryExpression> binaryExpressions;
     private final List<GLSLParser.Storage_qualifierContext> storageQualifiers;
     private final List<GLSLParser.Struct_declarationContext> structDeclarations;
     private final List<GLSLParser.Single_declarationContext> singleDeclarations;
     private final List<GLSLParser.Type_specifier_nonarrayContext> textures;
     public GLSLParser.External_declarationContext variable = null;
     public GLSLParser.External_declarationContext function = null;
+
+    @Desugar
+    private record CachedBinaryExpression(GLSLParser.Binary_expressionContext expr, String exprText) {}
 
     public Transformer(GLSLParser.Translation_unitContext root) {
         this.root = root;
@@ -149,9 +153,10 @@ public class Transformer {
         GLSLParser oldParser = new GLSLParser(new CommonTokenStream(oldLexer));
         var oldExpression = oldParser.binary_expression();
         String oldText = oldExpression.getText();
-        var binaryExpression = new ArrayList<>(binaryExpressions);
-        for (var ctx : binaryExpression) {
-            String ctxText = ctx.getText();
+        var exprList = new ArrayList<>(binaryExpressions);
+        for (var cachedExpr : exprList) {
+            String ctxText = cachedExpr.exprText();
+            var ctx = cachedExpr.expr();
             if (ctxText.equals(oldText)) {
                 GLSLLexer newLexer = new GLSLLexer(CharStreams.fromString(newCode));
                 GLSLParser newParser = new GLSLParser(new CommonTokenStream(newLexer));
@@ -598,7 +603,7 @@ public class Transformer {
     }
 
     public void addBinary(GLSLParser.Binary_expressionContext ctx) {
-        this.binaryExpressions.add(ctx);
+        this.binaryExpressions.add(new CachedBinaryExpression(ctx, ctx.getText()));
     }
 
     public void addStorage(GLSLParser.Storage_qualifierContext ctx) {
