@@ -38,7 +38,16 @@ public class Transformer {
     public GLSLParser.External_declarationContext function = null;
 
     @Desugar
-    private record CachedTextExpression<T>(T expr, String exprText) {}
+    private record CachedTextExpression<T>(T expr, String exprText) {
+        @Override
+        public boolean equals(Object obj) {
+            if(obj instanceof CachedTextExpression<?> cachedExpr) {
+                return cachedExpr.expr == this.expr;
+            } else {
+                return false;
+            }
+        }
+    }
 
     public Transformer(GLSLParser.Translation_unitContext root) {
         this.root = root;
