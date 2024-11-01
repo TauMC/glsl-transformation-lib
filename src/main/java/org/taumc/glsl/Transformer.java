@@ -47,6 +47,11 @@ public class Transformer {
                 return false;
             }
         }
+
+        @Override
+        public int hashCode() {
+            return System.identityHashCode(expr);
+        }
     }
 
     public Transformer(GLSLParser.Translation_unitContext root) {
@@ -635,7 +640,7 @@ public class Transformer {
     }
 
     public void removePostfix(GLSLParser.Postfix_expressionContext ctx) {
-        postfixExpressions.remove(new CachedTextExpression<>(ctx, ctx.getText()));
+        postfixExpressions.remove(new CachedTextExpression<>(ctx, null));
     }
 
     public void removeAssignment(GLSLParser.Assignment_expressionContext ctx) {
@@ -643,7 +648,7 @@ public class Transformer {
     }
 
     public void removeBinary(GLSLParser.Binary_expressionContext ctx) {
-        binaryExpressions.remove(new CachedTextExpression<>(ctx, ctx.getText()));
+        binaryExpressions.remove(new CachedTextExpression<>(ctx, null));
     }
 
     public void removeStorage(GLSLParser.Storage_qualifierContext ctx) {
