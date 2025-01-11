@@ -112,20 +112,26 @@ public class Transformer {
     public void injectFunction(String code) {
         var insert = ShaderParser.parseSnippet(code, GLSLParser::external_declaration);
 
+
         if (function == null) {
-            if (functionDefinitions.get(0).getParent() instanceof GLSLParser.External_declarationContext list) {
+            if (!functionDefinitions.isEmpty() && functionDefinitions.get(0).getParent() instanceof GLSLParser.External_declarationContext list) {
                 function = list;
             }
         }
 
+        ParserRuleContext parent;
+
         if (function != null) {
-            var parent = function.getParent();
-            int i = parent.children.indexOf(function);
-            parent.children.add(i, insert);
-            insert.setParent(parent);
-            scanNode(insert);
-            ParseTreeWalker.DEFAULT.walk(new InjectorPoint(this, true), insert);
+            parent = function.getParent();
+        } else {
+            parent = this.root;
         }
+
+        int i = function != null ? parent.children.indexOf(function) : parent.children.size();
+        parent.children.add(i, insert);
+        insert.setParent(parent);
+        scanNode(insert);
+        ParseTreeWalker.DEFAULT.walk(new InjectorPoint(this, true), insert);
     }
 
     public void injectAtEnd(String code) {
