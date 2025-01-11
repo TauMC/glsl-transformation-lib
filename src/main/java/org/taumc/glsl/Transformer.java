@@ -28,9 +28,9 @@ public class Transformer {
 
     public Transformer(GLSLParser.Translation_unitContext root) {
         this.root = root;
-        this.cachedContexts = new List[GLSLParser.ruleNames.length];
+        this.cachedContexts = new Collection[GLSLParser.ruleNames.length];
         for (int i = 0; i < this.cachedContexts.length; i++) {
-            this.cachedContexts[i] = new ArrayList<>();
+            this.cachedContexts[i] = new LinkedHashSet<>();
         }
         ParseTreeWalker.DEFAULT.walk(new TransformerCollector(this), root);
     }

@@ -34,7 +34,7 @@ public class TransformerRemover extends GLSLParserBaseListener {
 
     void performRemovals() {
         this.batchedRemovals.forEach((i, set) -> {
-            transformer.cachedContexts[i].removeIf(set::contains);
+            transformer.cachedContexts[i].removeAll(set);
         });
     }
 }
