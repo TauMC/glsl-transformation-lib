@@ -133,6 +133,7 @@ public class Transformer {
     @Deprecated
     public void replaceExpression(String oldCode, String newCode) {
         replaceExpression(oldCode, newCode, GLSLParser::binary_expression);
+        replaceExpression(oldCode, newCode, GLSLParser::postfix_expression);
     }
 
     public <T extends ParserRuleContext> void replaceExpression(String oldCode, String newCode, Function<GLSLParser, T> expressionType) {
