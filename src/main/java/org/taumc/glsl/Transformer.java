@@ -1,9 +1,10 @@
 package org.taumc.glsl;
 
-import com.github.bsideup.jabel.Desugar;
 import org.antlr.v4.runtime.CommonToken;
 import org.antlr.v4.runtime.ParserRuleContext;
+import org.antlr.v4.runtime.RuleContext;
 import org.antlr.v4.runtime.Token;
+import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
 import org.antlr.v4.runtime.tree.TerminalNode;
 import org.taumc.glsl.grammar.GLSLParser;
@@ -136,13 +137,40 @@ public class Transformer {
         replaceExpression(oldCode, newCode, GLSLParser::postfix_expression);
     }
 
+    private final ArrayDeque<ParseTree> nodeStack = new ArrayDeque<>();
+
+    private boolean textEqual(RuleContext ctx, String text) {
+        int currentIndex = 0;
+        var stack = nodeStack;
+        stack.add(ctx);
+        boolean matches = true;
+        // Traverse all leaf nodes,
+        while (!stack.isEmpty()) {
+            var node = stack.removeLast();
+            if (node.getChildCount() == 0) {
+                // Leaf, compare that part of text
+                String nodeText = node.getText();
+                if (!text.regionMatches(currentIndex, nodeText, 0, nodeText.length())) {
+                    matches = false;
+                    break;
+                }
+                currentIndex += nodeText.length();
+            } else {
+                for (int i = node.getChildCount() - 1; i >= 0; i--) {
+                    stack.add(node.getChild(i));
+                }
+            }
+        }
+        stack.clear();
+        return matches && currentIndex == text.length();
+    }
+
     public <T extends ParserRuleContext> void replaceExpression(String oldCode, String newCode, Function<GLSLParser, T> expressionType) {
         var oldExpression = ShaderParser.parseSnippet(oldCode, expressionType);
         String oldText = oldExpression.getText();
         List<T> exprList = new ArrayList<>(getContextsForRule(oldExpression.getRuleIndex()));
         for (var ctx : exprList) {
-            String ctxText = ctx.getText();
-            if (ctxText.equals(oldText)) {
+            if (textEqual(ctx, oldText)) {
                 replaceNode(ctx, ShaderParser.parseSnippet(newCode, expressionType));
             }
         }
