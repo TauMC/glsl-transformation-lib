@@ -263,7 +263,7 @@ public class Transformer {
     public int findType(String code) {
         for (var ctx : singleDeclarations) {
             if (ctx.typeless_declaration() == null) {
-                return 0;
+                continue;
             }
             if (ctx.typeless_declaration().IDENTIFIER().getSymbol() instanceof CommonToken cToken) {
                 if (cToken.getText().equals(code)) {
