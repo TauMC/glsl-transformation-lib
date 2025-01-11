@@ -3,6 +3,7 @@ plugins {
     id 'java-library'
     id 'maven-publish'
     id "com.cinnober.gradle.semver-git" version "3.0.0" apply false
+    id 'com.gradleup.shadow' version '8.3.0'
 }
 
 group = 'org.taumc'
@@ -24,8 +25,18 @@ dependencies {
     annotationProcessor 'com.github.bsideup.jabel:jabel-javac-plugin:1.0.1'
     compileOnly 'com.github.bsideup.jabel:jabel-javac-plugin:1.0.1'
 
-    antlr "org.antlr:antlr4:4.13.2"
-    implementation 'org.anarres:jcpp:1.4.14'
+    def antlrVersion = "4.13.2"
+
+    shadow("org.antlr:antlr4-runtime:${antlrVersion}") {
+        transitive = false
+    }
+    antlr "org.antlr:antlr4:${antlrVersion}"
+
+    def jcppVersion = "1.4.14"
+    implementation "org.anarres:jcpp:${jcppVersion}"
+    shadow("org.anarres:jcpp:${jcppVersion}") {
+        transitive = false
+    }
 
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
@@ -56,6 +67,15 @@ generateGrammarSource {
 
 test {
     useJUnitPlatform()
+}
+
+tasks.named('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    configurations = [project.configurations.shadow]
+
+    archiveClassifier = 'fat'
+
+    enableRelocation = true
+    relocationPrefix = "org.taumc.glsl.shadowed"
 }
 
 publishing {
