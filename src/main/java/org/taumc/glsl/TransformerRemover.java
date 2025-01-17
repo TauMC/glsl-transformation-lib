@@ -29,6 +29,13 @@ public class TransformerRemover extends GLSLParserBaseListener {
         int ruleIndex = ctx.getRuleIndex();
         if (ruleIndex >= 0 && ruleIndex < transformer.cachedContexts.length) {
             this.batchedRemovals.computeIfAbsent(ruleIndex, k -> Collections.newSetFromMap(new IdentityHashMap<>())).add(ctx);
+            if (transformer.cachedContextsByText[ruleIndex] != null) {
+                var map = transformer.cachedContextsByText[ruleIndex];
+                var collection = map.get(ctx.getText());
+                if (collection != null) {
+                    collection.remove(ctx);
+                }
+            }
         }
     }
 

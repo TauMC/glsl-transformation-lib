@@ -17,13 +17,39 @@ import java.util.stream.Collectors;
 public class Transformer {
     private final GLSLParser.Translation_unitContext root;
     final Collection<ParserRuleContext>[] cachedContexts;
+    final Map<String, Collection<ParserRuleContext>>[] cachedContextsByText;
 
     public GLSLParser.External_declarationContext variable = null;
     public GLSLParser.External_declarationContext function = null;
 
+
     @SuppressWarnings("unchecked")
     private <T extends ParserRuleContext> Collection<T> getContextsForRule(int ruleIndex) {
         return ruleIndex >= 0 && ruleIndex < this.cachedContexts.length ? (Collection<T>)this.cachedContexts[ruleIndex] : Collections.emptyList();
+    }
+
+    private Map<String, Collection<ParserRuleContext>> buildCacheForRuleIndex(int ruleIndex) {
+        var contexts = getContextsForRule(ruleIndex);
+        Map<String, Collection<ParserRuleContext>> map = new HashMap<>();
+
+        for (var ctx : contexts) {
+            Collection<ParserRuleContext> coll = map.computeIfAbsent(ctx.getText(), k -> Collections.newSetFromMap(new IdentityHashMap<>()));
+            coll.add(ctx);
+        }
+
+        cachedContextsByText[ruleIndex] = map;
+
+        return map;
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T extends ParserRuleContext> Collection<T> getCachedContextsByText(int ruleIndex, String text) {
+        Map<String, Collection<ParserRuleContext>> cacheByText = cachedContextsByText[ruleIndex];
+        if (cacheByText == null) {
+            cacheByText = buildCacheForRuleIndex(ruleIndex);
+        }
+        var collection = cacheByText.get(text);
+        return collection != null ? (Collection<T>)collection : Collections.emptySet();
     }
 
     public Transformer(GLSLParser.Translation_unitContext root) {
@@ -32,6 +58,7 @@ public class Transformer {
         for (int i = 0; i < this.cachedContexts.length; i++) {
             this.cachedContexts[i] = new LinkedHashSet<>();
         }
+        this.cachedContextsByText = new Map[GLSLParser.ruleNames.length];
         ParseTreeWalker.DEFAULT.walk(new TransformerCollector(this), root);
     }
 
@@ -168,11 +195,9 @@ public class Transformer {
     public <T extends ParserRuleContext> void replaceExpression(String oldCode, String newCode, Function<GLSLParser, T> expressionType) {
         var oldExpression = ShaderParser.parseSnippet(oldCode, expressionType);
         String oldText = oldExpression.getText();
-        List<T> exprList = new ArrayList<>(getContextsForRule(oldExpression.getRuleIndex()));
+        List<T> exprList = new ArrayList<>(getCachedContextsByText(oldExpression.getRuleIndex(), oldText));
         for (var ctx : exprList) {
-            if (textEqual(ctx, oldText)) {
-                replaceNode(ctx, ShaderParser.parseSnippet(newCode, expressionType));
-            }
+            replaceNode(ctx, ShaderParser.parseSnippet(newCode, expressionType));
         }
     }
 

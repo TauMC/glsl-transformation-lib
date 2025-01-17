@@ -21,6 +21,10 @@ public class TransformerCollector extends GLSLParserBaseListener {
         int ruleIndex = ctx.getRuleIndex();
         if (ruleIndex >= 0 && ruleIndex < transformer.cachedContexts.length) {
             transformer.cachedContexts[ruleIndex].add(ctx);
+            if (transformer.cachedContextsByText[ruleIndex] != null) {
+                var collection = transformer.cachedContextsByText[ruleIndex].computeIfAbsent(ctx.getText(), k -> Collections.newSetFromMap(new IdentityHashMap<>()));
+                collection.add(ctx);
+            }
         }
     }
 }
