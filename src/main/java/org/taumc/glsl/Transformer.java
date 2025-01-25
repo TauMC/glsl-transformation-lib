@@ -397,19 +397,17 @@ public class Transformer {
         List<TerminalNode> nodes = new ArrayList<>();
         Collection<GLSLParser.Function_prototypeContext> functionPrototypes = getContextsForRule(GLSLParser.RULE_function_prototype);
         Collection<GLSLParser.Variable_identifierContext> variableIdentifiers = getContextsForRule(GLSLParser.RULE_variable_identifier);
+        Collection<GLSLParser.Type_specifier_nonarrayContext> nonArraySpecifiers = getContextsForRule(GLSLParser.RULE_type_specifier_nonarray);
 
         nodes.addAll(functionPrototypes.stream().map(GLSLParser.Function_prototypeContext::IDENTIFIER).collect(Collectors.toList()));
         nodes.addAll(variableIdentifiers.stream().map(GLSLParser.Variable_identifierContext::IDENTIFIER).collect(Collectors.toList()));
-        // TODO necessary?
-        /*
-        nodes.addAll(textures.stream().map(c -> {
+        nodes.addAll(nonArraySpecifiers.stream().map(c -> {
             if (c.TEXTURE2D() != null) {
                 return c.TEXTURE2D();
             } else {
                 return c.TEXTURE3D();
             }
-        }).collect(Collectors.toList()));
-         */
+        }).filter(Objects::nonNull).collect(Collectors.toList()));
         for (var node : nodes) {
             Token token = node.getSymbol();
             if(token instanceof CommonToken cToken) {
