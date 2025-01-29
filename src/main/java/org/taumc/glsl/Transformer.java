@@ -1,73 +1,64 @@
 package org.taumc.glsl;
 
-import com.github.bsideup.jabel.Desugar;
-import com.ibm.icu.impl.CollectionSet;
-import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonToken;
-import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.RuleContext;
 import org.antlr.v4.runtime.Token;
+import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
 import org.antlr.v4.runtime.tree.TerminalNode;
 import org.taumc.glsl.grammar.GLSLParser;
 
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class Transformer {
-
     private final GLSLParser.Translation_unitContext root;
-    private final List<GLSLParser.Function_definitionContext> functionDefinitions;
-    private final List<CachedTextExpression<GLSLParser.Postfix_expressionContext>> postfixExpressions;
-    private final List<GLSLParser.Assignment_expressionContext> assignmentExpressions;
-    private final List<GLSLParser.Variable_identifierContext> variableIdentifiers;
-    private final List<GLSLParser.Parameter_declarationContext> parameterDeclarations;
-    private final List<GLSLParser.Typeless_declarationContext> typelessDeclarations;
-    private final List<GLSLParser.Function_prototypeContext> functionPrototypes;
-    private final List<CachedTextExpression<GLSLParser.Binary_expressionContext>> binaryExpressions;
-    private final List<GLSLParser.Storage_qualifierContext> storageQualifiers;
-    private final List<GLSLParser.Struct_declarationContext> structDeclarations;
-    private final List<GLSLParser.Single_declarationContext> singleDeclarations;
-    private final List<GLSLParser.Type_specifier_nonarrayContext> textures;
+    final Collection<ParserRuleContext>[] cachedContexts;
+    final Map<String, Collection<ParserRuleContext>>[] cachedContextsByText;
+
     public GLSLParser.External_declarationContext variable = null;
     public GLSLParser.External_declarationContext function = null;
 
-    @Desugar
-    private record CachedTextExpression<T>(T expr, String exprText) {
-        @Override
-        public boolean equals(Object obj) {
-            if(obj instanceof CachedTextExpression<?> cachedExpr) {
-                return cachedExpr.expr == this.expr;
-            } else {
-                return false;
-            }
+
+    @SuppressWarnings("unchecked")
+    private <T extends ParserRuleContext> Collection<T> getContextsForRule(int ruleIndex) {
+        return ruleIndex >= 0 && ruleIndex < this.cachedContexts.length ? (Collection<T>)this.cachedContexts[ruleIndex] : Collections.emptyList();
+    }
+
+    private Map<String, Collection<ParserRuleContext>> buildCacheForRuleIndex(int ruleIndex) {
+        var contexts = getContextsForRule(ruleIndex);
+        Map<String, Collection<ParserRuleContext>> map = new HashMap<>();
+
+        for (var ctx : contexts) {
+            Collection<ParserRuleContext> coll = map.computeIfAbsent(ctx.getText(), k -> Collections.newSetFromMap(new IdentityHashMap<>()));
+            coll.add(ctx);
         }
 
-        @Override
-        public int hashCode() {
-            return System.identityHashCode(expr);
+        cachedContextsByText[ruleIndex] = map;
+
+        return map;
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T extends ParserRuleContext> Collection<T> getCachedContextsByText(int ruleIndex, String text) {
+        Map<String, Collection<ParserRuleContext>> cacheByText = cachedContextsByText[ruleIndex];
+        if (cacheByText == null) {
+            cacheByText = buildCacheForRuleIndex(ruleIndex);
         }
+        var collection = cacheByText.get(text);
+        return collection != null ? (Collection<T>)collection : Collections.emptySet();
     }
 
     public Transformer(GLSLParser.Translation_unitContext root) {
         this.root = root;
-        this.functionDefinitions = new ArrayList<>();
-        this.postfixExpressions = new ArrayList<>();
-        this.assignmentExpressions = new ArrayList<>();
-        this.variableIdentifiers = new ArrayList<>();
-        this.parameterDeclarations = new ArrayList<>();
-        this.typelessDeclarations = new ArrayList<>();
-        this.functionPrototypes = new ArrayList<>();
-        this.binaryExpressions = new ArrayList<>();
-        this.storageQualifiers = new ArrayList<>();
-        this.structDeclarations = new ArrayList<>();
-        this.singleDeclarations = new ArrayList<>();
-        this.textures = new ArrayList<>();
+        this.cachedContexts = new Collection[GLSLParser.ruleNames.length];
+        for (int i = 0; i < this.cachedContexts.length; i++) {
+            this.cachedContexts[i] = new LinkedHashSet<>();
+        }
+        this.cachedContextsByText = new Map[GLSLParser.ruleNames.length];
         ParseTreeWalker.DEFAULT.walk(new TransformerCollector(this), root);
     }
 
@@ -79,8 +70,9 @@ public class Transformer {
         var insert = ShaderParser.parseSnippet(code, GLSLParser::external_declaration);
 
         if (variable == null) {
+            var storageQualifiers = getContextsForRule(GLSLParser.RULE_storage_qualifier);
             if (!storageQualifiers.isEmpty()) {
-                var parent = storageQualifiers.get(0).getParent();
+                var parent = storageQualifiers.iterator().next().getParent();
                 while (!(parent instanceof GLSLParser.External_declarationContext)) {
                     if (parent.getParent() == null) {
                         break;
@@ -94,7 +86,8 @@ public class Transformer {
         }
 
         if (variable == null){
-            if (functionDefinitions.get(0).getParent() instanceof GLSLParser.External_declarationContext list) {
+            var functionDefinitions = getContextsForRule(GLSLParser.RULE_function_definition);
+            if (functionDefinitions.iterator().next().getParent() instanceof GLSLParser.External_declarationContext list) {
                 variable = list;
             }
         }
@@ -114,7 +107,8 @@ public class Transformer {
 
 
         if (function == null) {
-            if (!functionDefinitions.isEmpty() && functionDefinitions.get(0).getParent() instanceof GLSLParser.External_declarationContext list) {
+            var functionDefinitions = getContextsForRule(GLSLParser.RULE_function_definition);
+            if (!functionDefinitions.isEmpty() && functionDefinitions.iterator().next().getParent() instanceof GLSLParser.External_declarationContext list) {
                 function = list;
             }
         }
@@ -127,7 +121,7 @@ public class Transformer {
             parent = this.root;
         }
 
-        int i = function != null ? parent.children.indexOf(function) : parent.children.size();
+        int i = parent.children.indexOf(function);
         parent.children.add(i, insert);
         insert.setParent(parent);
         scanNode(insert);
@@ -147,6 +141,9 @@ public class Transformer {
 
     public void rename(Map<String, String> names) {
         List<TerminalNode> nodes = new ArrayList<>();
+        Collection<GLSLParser.Typeless_declarationContext> typelessDeclarations = getContextsForRule(GLSLParser.RULE_typeless_declaration);
+        Collection<GLSLParser.Function_prototypeContext> functionPrototypes = getContextsForRule(GLSLParser.RULE_function_prototype);
+        Collection<GLSLParser.Variable_identifierContext> variableIdentifiers = getContextsForRule(GLSLParser.RULE_variable_identifier);
         nodes.addAll(typelessDeclarations.stream().map(GLSLParser.Typeless_declarationContext::IDENTIFIER).collect(Collectors.toList()));
         nodes.addAll(variableIdentifiers.stream().map(GLSLParser.Variable_identifierContext::IDENTIFIER).collect(Collectors.toList()));
         nodes.addAll(functionPrototypes.stream().map(GLSLParser.Function_prototypeContext::IDENTIFIER).collect(Collectors.toList()));
@@ -161,34 +158,46 @@ public class Transformer {
         }
     }
 
+    @Deprecated
     public void replaceExpression(String oldCode, String newCode) {
-        var oldExpression = ShaderParser.parseSnippet(oldCode, GLSLParser::binary_expression);
-        String oldText = oldExpression.getText();
-        var exprList = new ArrayList<>(binaryExpressions);
-        for (var cachedExpr : exprList) {
-            String ctxText = cachedExpr.exprText();
-            var ctx = cachedExpr.expr();
-            if (ctxText.equals(oldText)) {
-                replaceNode(ctx, ShaderParser.parseSnippet(newCode, GLSLParser::binary_expression));
-            } else if (ctxText.startsWith(oldText)) {
-                if (ctx.unary_expression() != null) {
-                    if (ctx.unary_expression().postfix_expression() != null) {
-                        if (ctx.unary_expression().postfix_expression().postfix_expression() != null) {
-                            var postfix = ctx.unary_expression().postfix_expression().postfix_expression();
-                            while (postfix.getText().startsWith(oldText) && !postfix.getText().equals(oldText)) {
-                                if (postfix.postfix_expression() != null) {
-                                    postfix = postfix.postfix_expression();
-                                } else {
-                                    break;
-                                }
-                            }
-                            if (postfix.getText().equals(oldText)) {
-                                replaceNode(postfix, ShaderParser.parseSnippet(newCode, GLSLParser::unary_expression));
-                            }
-                        }
-                    }
+        replaceExpression(oldCode, newCode, GLSLParser::binary_expression);
+        replaceExpression(oldCode, newCode, GLSLParser::postfix_expression);
+    }
+
+    private final ArrayDeque<ParseTree> nodeStack = new ArrayDeque<>();
+
+    private boolean textEqual(RuleContext ctx, String text) {
+        int currentIndex = 0;
+        var stack = nodeStack;
+        stack.add(ctx);
+        boolean matches = true;
+        // Traverse all leaf nodes,
+        while (!stack.isEmpty()) {
+            var node = stack.removeLast();
+            if (node.getChildCount() == 0) {
+                // Leaf, compare that part of text
+                String nodeText = node.getText();
+                if (!text.regionMatches(currentIndex, nodeText, 0, nodeText.length())) {
+                    matches = false;
+                    break;
+                }
+                currentIndex += nodeText.length();
+            } else {
+                for (int i = node.getChildCount() - 1; i >= 0; i--) {
+                    stack.add(node.getChild(i));
                 }
             }
+        }
+        stack.clear();
+        return matches && currentIndex == text.length();
+    }
+
+    public <T extends ParserRuleContext> void replaceExpression(String oldCode, String newCode, Function<GLSLParser, T> expressionType) {
+        var oldExpression = ShaderParser.parseSnippet(oldCode, expressionType);
+        String oldText = oldExpression.getText();
+        List<T> exprList = new ArrayList<>(getCachedContextsByText(oldExpression.getRuleIndex(), oldText));
+        for (var ctx : exprList) {
+            replaceNode(ctx, ShaderParser.parseSnippet(newCode, expressionType));
         }
     }
 
@@ -201,7 +210,9 @@ public class Transformer {
     }
 
     private void removeNode(ParserRuleContext node) {
-        ParseTreeWalker.DEFAULT.walk(new TransformerRemover(this), node);
+        var remover = new TransformerRemover(this);
+        ParseTreeWalker.DEFAULT.walk(remover, node);
+        remover.performRemovals();
     }
 
     private void scanNode(ParserRuleContext node) {
@@ -210,6 +221,7 @@ public class Transformer {
 
     public void prependMain(String code) {
         var insert = ShaderParser.parseSnippet(code, GLSLParser::statement);
+        Collection<GLSLParser.Function_definitionContext> functionDefinitions = getContextsForRule(GLSLParser.RULE_function_definition);
         for (var ctx : functionDefinitions) {
             if (ctx.function_prototype().IDENTIFIER().getText().equals("main")) {
                 ctx.compound_statement_no_new_scope().statement_list().children.add(0, insert);
@@ -220,7 +232,7 @@ public class Transformer {
 
     public void removeVariable(String code) {
         ParserRuleContext typeless = null;
-        var typelessDeclaration = new ArrayList<>(this.typelessDeclarations);
+        Collection<GLSLParser.Typeless_declarationContext> typelessDeclaration = getContextsForRule(GLSLParser.RULE_typeless_declaration);
         for (var ctx : typelessDeclaration) {
             if (ctx.IDENTIFIER() != null) {
                 Token token = ctx.IDENTIFIER().getSymbol();
@@ -267,6 +279,7 @@ public class Transformer {
     }
 
     public int findType(String code) {
+        Collection<GLSLParser.Single_declarationContext> singleDeclarations = getContextsForRule(GLSLParser.RULE_single_declaration);
         for (var ctx : singleDeclarations) {
             if (ctx.typeless_declaration() == null) {
                 continue;
@@ -299,6 +312,7 @@ public class Transformer {
 
     public void appendMain(String code) {
         var insert = ShaderParser.parseSnippet(code, GLSLParser::statement);
+        Collection<GLSLParser.Function_definitionContext> functionDefinitions = getContextsForRule(GLSLParser.RULE_function_definition);
         for (var ctx : functionDefinitions) {
             if (ctx.function_prototype().IDENTIFIER().getText().equals("main")) {
                 ctx.compound_statement_no_new_scope().statement_list().children.add(insert);
@@ -308,6 +322,7 @@ public class Transformer {
     }
 
     public boolean containsCall(String name) {
+        Collection<GLSLParser.Variable_identifierContext> variableIdentifiers = getContextsForRule(GLSLParser.RULE_variable_identifier);
         for (var ctx : variableIdentifiers) {
             if (ctx.IDENTIFIER().getSymbol() instanceof CommonToken cToken) {
                 if (cToken.getText().equals(name)) {
@@ -320,6 +335,8 @@ public class Transformer {
 
     public boolean hasVariable(String name) {
         List<TerminalNode> nodes = new ArrayList<>();
+        Collection<GLSLParser.Typeless_declarationContext> typelessDeclarations = getContextsForRule(GLSLParser.RULE_typeless_declaration);
+        Collection<GLSLParser.Function_prototypeContext> functionPrototypes = getContextsForRule(GLSLParser.RULE_function_prototype);
         nodes.addAll(typelessDeclarations.stream().map(GLSLParser.Typeless_declarationContext::IDENTIFIER).collect(Collectors.toList()));
         nodes.addAll(functionPrototypes.stream().map(GLSLParser.Function_prototypeContext::IDENTIFIER).collect(Collectors.toList()));
         for (var node : nodes) {
@@ -338,8 +355,8 @@ public class Transformer {
     }
 
     public void renameArray(Map<String, String> replacements, Set<Integer> found) {
-        for (var cachedExpr : postfixExpressions) {
-            var ctx = cachedExpr.expr();
+        Collection<GLSLParser.Postfix_expressionContext> postfixExpressions = getContextsForRule(GLSLParser.RULE_postfix_expression);
+        for (var ctx : postfixExpressions) {
             if (ctx.postfix_expression() == null) {
                 continue;
             }
@@ -378,15 +395,19 @@ public class Transformer {
 
     public void renameFunctionCall(Map<String, String> names) {
         List<TerminalNode> nodes = new ArrayList<>();
+        Collection<GLSLParser.Function_prototypeContext> functionPrototypes = getContextsForRule(GLSLParser.RULE_function_prototype);
+        Collection<GLSLParser.Variable_identifierContext> variableIdentifiers = getContextsForRule(GLSLParser.RULE_variable_identifier);
+        Collection<GLSLParser.Type_specifier_nonarrayContext> nonArraySpecifiers = getContextsForRule(GLSLParser.RULE_type_specifier_nonarray);
+
         nodes.addAll(functionPrototypes.stream().map(GLSLParser.Function_prototypeContext::IDENTIFIER).collect(Collectors.toList()));
         nodes.addAll(variableIdentifiers.stream().map(GLSLParser.Variable_identifierContext::IDENTIFIER).collect(Collectors.toList()));
-        nodes.addAll(textures.stream().map(c -> {
+        nodes.addAll(nonArraySpecifiers.stream().map(c -> {
             if (c.TEXTURE2D() != null) {
                 return c.TEXTURE2D();
             } else {
                 return c.TEXTURE3D();
             }
-        }).collect(Collectors.toList()));
+        }).filter(Objects::nonNull).collect(Collectors.toList()));
         for (var node : nodes) {
             Token token = node.getSymbol();
             if(token instanceof CommonToken cToken) {
@@ -399,19 +420,23 @@ public class Transformer {
     }
 
     public void renameAndWrapShadow(String oldName, String newName) {
-        var postfixExpression = new ArrayList<>(postfixExpressions);
-        for (var cachedExpr : postfixExpression) {
-            String function = cachedExpr.exprText();
-            if (cachedExpr.expr().function_call_parameters() != null && function.startsWith(oldName + "(")) {
+        List<GLSLParser.Postfix_expressionContext> postfixExpressions = new ArrayList<>(getContextsForRule(GLSLParser.RULE_postfix_expression));
+        for (var expr : postfixExpressions) {
+            if (expr.function_call_parameters() == null) {
+                continue;
+            }
+            String function = expr.getText();
+            if (expr.function_call_parameters() != null && function.startsWith(oldName + "(")) {
                 function = "vec4" + "(" + function + ")";
                 var def = ShaderParser.parseSnippet(function, GLSLParser::postfix_expression);
-                replaceNode(cachedExpr.expr(), def);
+                replaceNode(expr, def);
             }
         }
         renameFunctionCall(oldName, newName);
     }
 
     public void removeFunction(String name) {
+        Collection<GLSLParser.Function_prototypeContext> functionPrototypes = getContextsForRule(GLSLParser.RULE_function_prototype);
         var functionPrototype = new ArrayList<>(functionPrototypes);
         for (var ctx : functionPrototype) {
             if (ctx.IDENTIFIER().getText().equals(name)) {
@@ -424,6 +449,8 @@ public class Transformer {
     }
 
     public void removeUnusedFunctions() {
+        Collection<GLSLParser.Function_prototypeContext> functionPrototypes = getContextsForRule(GLSLParser.RULE_function_prototype);
+        Collection<GLSLParser.Variable_identifierContext> variableIdentifiers = getContextsForRule(GLSLParser.RULE_variable_identifier);
         List<String> result = functionPrototypes.stream().map(c -> c.IDENTIFIER().getText()).collect(Collectors.toList());
         List<String> usedIdentifiers = variableIdentifiers.stream().map(c -> c.IDENTIFIER().getText()).collect(Collectors.toList());
         List<String> functionsToRemove = result.stream().filter(name -> !usedIdentifiers.contains(name) && !name.equals("main")).collect(Collectors.toList());
@@ -435,6 +462,7 @@ public class Transformer {
 
     public Map<String, List<String>> findConstParameter() {
         Map<String, List<String>> functions = new HashMap<>();
+        Collection<GLSLParser.Parameter_declarationContext> parameterDeclarations = getContextsForRule(GLSLParser.RULE_parameter_declaration);
         for (var ctx : parameterDeclarations) {
             GLSLParser.Type_qualifierContext typeQualifierContext = ctx.type_qualifier();
             if (typeQualifierContext == null) {
@@ -462,6 +490,7 @@ public class Transformer {
     }
 
     public void removeConstAssignment(Map<String, List<String>> functions) {
+        Collection<GLSLParser.Variable_identifierContext> variableIdentifiers = getContextsForRule(GLSLParser.RULE_variable_identifier);
         for (Map.Entry<String, List<String>> entry : functions.entrySet()) {
             for (var ctx : variableIdentifiers) {
                 if (entry.getValue().contains(ctx.IDENTIFIER().getText())) {
@@ -519,6 +548,7 @@ public class Transformer {
 
     public Map<String, GLSLParser.Single_declarationContext> findQualifiers(int type) {
         Map<String, GLSLParser.Single_declarationContext> nodes = new HashMap<>();
+        Collection<GLSLParser.Storage_qualifierContext> storageQualifiers = getContextsForRule(GLSLParser.RULE_storage_qualifier);
         mainLoop:
         for (var ctx : storageQualifiers) {
             if (ctx.children.get(0) instanceof TerminalNode node &&
@@ -547,6 +577,7 @@ public class Transformer {
     }
 
     public boolean hasAssigment(String name) {
+        Collection<GLSLParser.Assignment_expressionContext> assignmentExpressions = getContextsForRule(GLSLParser.RULE_assignment_expression);
         for (var ctx : assignmentExpressions) {
             if (ctx.unary_expression() != null && (ctx.unary_expression().getText().startsWith(name) || ctx.unary_expression().getText().startsWith(name + "."))) {
                 return true;
@@ -556,6 +587,7 @@ public class Transformer {
     }
 
     public void rewriteStructArrays() {
+        Collection<GLSLParser.Struct_declarationContext> structDeclarations = getContextsForRule(GLSLParser.RULE_struct_declaration);
         for (var ctx : structDeclarations) {
             if (ctx.type_specifier().array_specifier() != null) {
                 var array_specifier = ctx.type_specifier().array_specifier();
@@ -572,104 +604,7 @@ public class Transformer {
     }
 
     public List<TerminalNode> collectStorage() {
+        Collection<GLSLParser.Storage_qualifierContext> storageQualifiers = getContextsForRule(GLSLParser.RULE_storage_qualifier);
         return storageQualifiers.stream().filter(ctx -> ctx.getChild(0) instanceof TerminalNode).map(ctx -> (TerminalNode) ctx.getChild(0)).collect(Collectors.toList());
-    }
-
-    //Add
-    public void addFunctionDefinition(GLSLParser.Function_definitionContext ctx) {
-        this.functionDefinitions.add(ctx);
-    }
-
-    public void addPostfix(GLSLParser.Postfix_expressionContext ctx) {
-        this.postfixExpressions.add(new CachedTextExpression<>(ctx, ctx.getText()));
-    }
-
-    public void addAssignment(GLSLParser.Assignment_expressionContext ctx) {
-        this.assignmentExpressions.add(ctx);
-    }
-
-    public void addVariable(GLSLParser.Variable_identifierContext ctx) {
-        this.variableIdentifiers.add(ctx);
-    }
-
-    public void addParameter(GLSLParser.Parameter_declarationContext ctx) {
-        this.parameterDeclarations.add(ctx);
-    }
-
-    public void addFunctionPrototype(GLSLParser.Function_prototypeContext ctx) {
-        this.functionPrototypes.add(ctx);
-    }
-
-    public void addTypeless(GLSLParser.Typeless_declarationContext ctx) {
-        this.typelessDeclarations.add(ctx);
-    }
-
-    public void addBinary(GLSLParser.Binary_expressionContext ctx) {
-        this.binaryExpressions.add(new CachedTextExpression<>(ctx, ctx.getText()));
-    }
-
-    public void addStorage(GLSLParser.Storage_qualifierContext ctx) {
-        this.storageQualifiers.add(ctx);
-    }
-
-    public void addStruct(GLSLParser.Struct_declarationContext ctx) {
-        this.structDeclarations.add(ctx);
-    }
-
-    public void addSingle(GLSLParser.Single_declarationContext ctx) {
-        this.singleDeclarations.add(ctx);
-    }
-
-    public void addTexture(GLSLParser.Type_specifier_nonarrayContext ctx) {
-        this.textures.add(ctx);
-    }
-
-    //Remove
-    public void removeFunctionDefinition(GLSLParser.Function_definitionContext ctx) {
-        functionDefinitions.remove(ctx);
-    }
-
-    public void removeFunctionPrototype(GLSLParser.Function_prototypeContext ctx) {
-        functionPrototypes.remove(ctx);
-    }
-
-    public void removeParameter(GLSLParser.Parameter_declarationContext ctx) {
-        parameterDeclarations.remove(ctx);
-    }
-
-    public void removeTypeless(GLSLParser.Typeless_declarationContext ctx) {
-        typelessDeclarations.remove(ctx);
-    }
-
-    public void removeTexture(GLSLParser.Type_specifier_nonarrayContext ctx) {
-        textures.remove(ctx);
-    }
-
-    public void removePostfix(GLSLParser.Postfix_expressionContext ctx) {
-        postfixExpressions.remove(new CachedTextExpression<>(ctx, null));
-    }
-
-    public void removeAssignment(GLSLParser.Assignment_expressionContext ctx) {
-        assignmentExpressions.remove(ctx);
-    }
-
-    public void removeBinary(GLSLParser.Binary_expressionContext ctx) {
-        binaryExpressions.remove(new CachedTextExpression<>(ctx, null));
-    }
-
-    public void removeStorage(GLSLParser.Storage_qualifierContext ctx) {
-        storageQualifiers.remove(ctx);
-    }
-
-    public void removeStruct(GLSLParser.Struct_declarationContext ctx) {
-        structDeclarations.remove(ctx);
-    }
-
-    public void removeSingle(GLSLParser.Single_declarationContext ctx) {
-        singleDeclarations.remove(ctx);
-    }
-
-    public void removeVariables(GLSLParser.Variable_identifierContext ctx) {
-        variableIdentifiers.remove(ctx);
     }
 }

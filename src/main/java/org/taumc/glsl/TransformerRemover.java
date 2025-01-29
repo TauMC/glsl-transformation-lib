@@ -1,78 +1,47 @@
 package org.taumc.glsl;
 
+import org.antlr.v4.runtime.ParserRuleContext;
 import org.taumc.glsl.grammar.GLSLParser;
 import org.taumc.glsl.grammar.GLSLParserBaseListener;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class TransformerRemover extends GLSLParserBaseListener {
 
     private final Transformer transformer;
+    private final Map<Integer, Set<ParserRuleContext>> batchedRemovals;
 
     public TransformerRemover(Transformer transformer) {
         this.transformer = transformer;
+        this.batchedRemovals = new HashMap<>();
     }
 
     @Override
-    public void enterFunction_definition(GLSLParser.Function_definitionContext ctx) {
-        this.transformer.removeFunctionDefinition(ctx);
-    }
-
-    @Override
-    public void enterFunction_prototype(GLSLParser.Function_prototypeContext ctx) {
-        this.transformer.removeFunctionPrototype(ctx);
-    }
-
-    @Override
-    public void enterParameter_declaration(GLSLParser.Parameter_declarationContext ctx) {
-        this.transformer.removeParameter(ctx);
-    }
-
-    @Override
-    public void enterVariable_identifier(GLSLParser.Variable_identifierContext ctx) {
-        this.transformer.removeVariables(ctx);
-    }
-
-    @Override
-    public void enterTypeless_declaration(GLSLParser.Typeless_declarationContext ctx) {
-        this.transformer.removeTypeless(ctx);
-    }
-
-    @Override
-    public void enterType_specifier_nonarray(GLSLParser.Type_specifier_nonarrayContext ctx) {
-        if (ctx.TEXTURE2D() != null) {
-            this.transformer.removeTexture(ctx);
-        }
-        if (ctx.TEXTURE3D() != null) {
-            this.transformer.removeTexture(ctx);
+    public void enterEveryRule(ParserRuleContext ctx) {
+        super.enterEveryRule(ctx);
+        int ruleIndex = ctx.getRuleIndex();
+        if (ruleIndex >= 0 && ruleIndex < transformer.cachedContexts.length) {
+            this.batchedRemovals.computeIfAbsent(ruleIndex, k -> Collections.newSetFromMap(new IdentityHashMap<>())).add(ctx);
+            if (transformer.cachedContextsByText[ruleIndex] != null) {
+                var map = transformer.cachedContextsByText[ruleIndex];
+                var collection = map.get(ctx.getText());
+                if (collection != null) {
+                    collection.remove(ctx);
+                }
+            }
         }
     }
 
-    @Override
-    public void enterPostfix_expression(GLSLParser.Postfix_expressionContext ctx) {
-        this.transformer.removePostfix(ctx);
-    }
-
-    @Override
-    public void exitAssignment_expression(GLSLParser.Assignment_expressionContext ctx) {
-        this.transformer.removeAssignment(ctx);
-    }
-
-    @Override
-    public void enterBinary_expression(GLSLParser.Binary_expressionContext ctx) {
-        this.transformer.removeBinary(ctx);
-    }
-
-    @Override
-    public void enterStorage_qualifier(GLSLParser.Storage_qualifierContext ctx) {
-        this.transformer.removeStorage(ctx);
-    }
-
-    @Override
-    public void enterStruct_declaration(GLSLParser.Struct_declarationContext ctx) {
-        this.transformer.removeStruct(ctx);
-    }
-
-    @Override
-    public void enterSingle_declaration(GLSLParser.Single_declarationContext ctx) {
-        this.transformer.removeSingle(ctx);
+    void performRemovals() {
+        this.batchedRemovals.forEach((i, set) -> {
+            transformer.cachedContexts[i].removeAll(set);
+        });
     }
 }
