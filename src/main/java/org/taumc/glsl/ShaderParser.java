@@ -17,7 +17,7 @@ import java.util.function.Function;
 
 public class ShaderParser {
     @Desugar
-    public record ParsedShader(GLSLPreParser.Translation_unitContext pre, GLSLParser.Translation_unitContext full) {}
+    public record ParsedShader(GLSLPreParser preParser, GLSLParser parser, GLSLPreParser.Translation_unitContext pre, GLSLParser.Translation_unitContext full) {}
 
     private static void configureNoError(Parser parser) {
         parser.setErrorHandler(new BailErrorStrategy());
@@ -36,7 +36,7 @@ public class ShaderParser {
         lexer.reset();
         parser.reset();
         var full = parser.translation_unit();
-        return new ParsedShader(pre, full);
+        return new ParsedShader(preParser, parser, pre, full);
     }
 
     public static ParsedShader parseShader(String shader) {
