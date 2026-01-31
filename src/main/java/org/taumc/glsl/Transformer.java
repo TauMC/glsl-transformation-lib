@@ -535,7 +535,7 @@ public class Transformer {
 
     public void initialize(GLSLParser.Single_declarationContext declarationContext, String name) {
         if (declarationContext.fully_specified_type().type_specifier().type_specifier_nonarray().getChild(0) instanceof TerminalNode node && node.getSymbol() instanceof CommonToken token) {
-            String insert = token.getText() + " " + name + " = " + BuiltinFunction.getByType(token.getType()).getInitializer() + ";" ;
+            String insert = name + " = " + BuiltinFunction.getByType(token.getType()).getInitializer() + ";" ;
             prependMain(insert);
         }
     }
