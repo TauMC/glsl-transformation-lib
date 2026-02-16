@@ -10,6 +10,10 @@ class ShaderPrinterTest {
         return new ShaderPrinter(ShaderParser.parseShader(input).full()).getFormattedShader();
     }
 
+    private static String formatPre(String input) {
+        return new ShaderPrinter(ShaderParser.parseShader(input).pre()).getFormattedShader();
+    }
+
     @Test
     void formatsDeterministicallyAndReadably() {
         String input = "void main(){float x=1.0;for(int i=0;i<2;i++){x+=i;}if(x>0.0){x=x-1.0;}else{x=0.0;}}";
@@ -359,5 +363,40 @@ class ShaderPrinterTest {
             + "}\n";
 
         assertEquals(expected, format(input));
+    }
+
+    @Test
+    void directiveVersion() {
+        assertEquals("#version 330 core\n", formatPre("#version 330 core\nvoid main(){}"));
+    }
+
+    @Test
+    void directiveExtension() {
+        assertEquals("#extension GL_ARB_gpu_shader5 : require\n",
+                formatPre("#extension GL_ARB_gpu_shader5 : require\nvoid main(){}"));
+    }
+
+    @Test
+    void directiveDefine() {
+        assertEquals("#define MY_CONST 1.0\n", formatPre("#define MY_CONST 1.0\nvoid main(){}"));
+    }
+
+    @Test
+    void directiveMultiple() {
+        String input = "#version 330 core\n#extension GL_ARB_gpu_shader5 : require\nvoid main(){}";
+        String expected = "#version 330 core\n#extension GL_ARB_gpu_shader5 : require\n";
+        assertEquals(expected, formatPre(input));
+    }
+
+    @Test
+    void directivePragma() {
+        assertEquals("#pragma optimize(on)\n", formatPre("#pragma optimize(on)\nvoid main(){}"));
+    }
+
+    @Test
+    void directiveIfdef() {
+        String input = "#ifdef MY_FLAG\n#define FOO 1\n#endif\nvoid main(){}";
+        String expected = "#ifdef MY_FLAG\n#define FOO 1\n#endif\n";
+        assertEquals(expected, formatPre(input));
     }
 }

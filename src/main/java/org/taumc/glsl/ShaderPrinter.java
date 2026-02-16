@@ -2,8 +2,11 @@ package org.taumc.glsl;
 
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNode;
+import org.taumc.glsl.grammar.GLSLLexer;
 import org.taumc.glsl.grammar.GLSLParser;
 import org.taumc.glsl.grammar.GLSLParserBaseVisitor;
+import org.taumc.glsl.grammar.GLSLPreParser;
+import org.taumc.glsl.grammar.GLSLPreParserBaseVisitor;
 
 /**
  * Formats a GLSL parse tree as a human-readable string with consistent indentation and spacing.
@@ -16,6 +19,11 @@ public class ShaderPrinter {
     }
 
     public String getFormattedShader() {
+        if (shaderTree instanceof GLSLPreParser.Translation_unitContext) {
+            var v = new PreVisitor();
+            v.visit(shaderTree);
+            return v.sb.toString();
+        }
         var v = new Visitor();
         v.visit(shaderTree);
         return v.sb.toString();
@@ -23,6 +31,97 @@ public class ShaderPrinter {
 
     public static String getFormattedShader(ParseTree tree) {
         return new ShaderPrinter(tree).getFormattedShader();
+    }
+
+    /**
+     * ANTLR visitor for the GLSLPreParser tree (preprocessor directives).
+     *
+     * <p>Uses the same {@code nextSep}/{@link #emit}/{@link #newline}/{@link #nosep} pattern as
+     * {@link Visitor}. Directives are never indented, so {@link #newline} simply sets
+     * {@link #nextSep} to {@code "\n"} with no leading spaces.
+     *
+     * <p>{@link #visitCompiler_directive} appends a newline after each top-level directive.
+     * Nested directives inside {@code #if}/{@code #ifdef}/{@code #ifndef} blocks fall through to
+     * {@code visitChildren} and are emitted inline; complex conditional blocks are not
+     * specially formatted beyond correct spacing.
+     */
+    private static class PreVisitor extends GLSLPreParserBaseVisitor<Void> {
+        final StringBuilder sb = new StringBuilder();
+        String nextSep = "";
+
+        void emit(String s) {
+            sb.append(nextSep);
+            sb.append(s);
+            nextSep = " ";
+        }
+
+        void newline() {
+            nextSep = "\n";
+        }
+
+        void nosep() {
+            nextSep = "";
+        }
+
+        @Override
+        public Void visitCompiler_directive(GLSLPreParser.Compiler_directiveContext ctx) {
+            nosep();
+            visitChildren(ctx);
+            sb.append('\n');
+            nextSep = "";
+            return null;
+        }
+
+        /**
+         * Inserts a newline before the content of a {@code #if}/{@code #ifdef}/{@code #ifndef}
+         * block body, separating the opening directive line from its contents.
+         */
+        @Override
+        public Void visitGroup_of_lines(GLSLPreParser.Group_of_linesContext ctx) {
+            sb.append('\n');
+            nextSep = "";
+            return visitChildren(ctx);
+        }
+
+        @Override
+        public Void visitTerminal(TerminalNode node) {
+            int type = node.getSymbol().getType();
+            String text = node.getText();
+            switch (type) {
+                case GLSLLexer.EOF:
+                    break;
+                case GLSLLexer.NUMBER_SIGN:
+                    nosep();
+                    emit("#");
+                    nosep();
+                    break;
+                case GLSLLexer.LEFT_PAREN:
+                case GLSLLexer.LEFT_BRACKET:
+                    nosep();
+                    emit(text);
+                    nosep();
+                    break;
+                case GLSLLexer.RIGHT_PAREN:
+                case GLSLLexer.RIGHT_BRACKET:
+                    nosep();
+                    emit(text);
+                    break;
+                // These tokens include their own leading whitespace as lexed;
+                // suppress the default separator to avoid doubling it.
+                case GLSLLexer.MACRO_TEXT:
+                case GLSLLexer.CONSTANT_EXPRESSION:
+                case GLSLLexer.ERROR_MESSAGE:
+                case GLSLLexer.LINE_EXPRESSION:
+                case GLSLLexer.PROGRAM_TEXT:
+                    nosep();
+                    emit(text);
+                    break;
+                default:
+                    emit(text);
+                    break;
+            }
+            return null;
+        }
     }
 
     /**
