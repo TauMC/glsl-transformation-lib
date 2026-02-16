@@ -191,7 +191,7 @@ public class Util {
     }
 
     public static void makeOutDeclaration(GLSLParser.Translation_unitContext root, GLSLParser.Single_declarationContext inDeclarationContext, String name) {
-        String insert = Main.getFormattedShader(inDeclarationContext.fully_specified_type()) + name + ";"; //TODO, find a different way to make the out declaration
+        String insert = ShaderPrinter.getFormattedShader(inDeclarationContext.fully_specified_type()) + name + ";"; //TODO, find a different way to make the out declaration
         insert = insert.replaceFirst("in", "out");
         Util.injectVariable(root, insert);
     }
