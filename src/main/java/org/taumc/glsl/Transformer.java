@@ -70,25 +70,48 @@ public class Transformer {
         var insert = ShaderParser.parseSnippet(code, GLSLParser::external_declaration);
 
         if (variable == null) {
+            // Locate the external_declaration wrapping the first function definition.
+            GLSLParser.External_declarationContext firstFuncExtDecl = null;
+            var functionDefinitions = getContextsForRule(GLSLParser.RULE_function_definition);
+            if (!functionDefinitions.isEmpty()) {
+                var fd = functionDefinitions.iterator().next();
+                if (fd.getParent() instanceof GLSLParser.External_declarationContext list) {
+                    firstFuncExtDecl = list;
+                }
+            }
+
+            // Use the first storage qualifier only if its external_declaration ancestor
+            // appears before the first function definition.  When the shader declares a
+            // function before its variable declarations the first storage qualifier found
+            // would be after that function, which would cause injected variables to land
+            // in the wrong position.
             var storageQualifiers = getContextsForRule(GLSLParser.RULE_storage_qualifier);
             if (!storageQualifiers.isEmpty()) {
                 var parent = storageQualifiers.iterator().next().getParent();
                 while (!(parent instanceof GLSLParser.External_declarationContext)) {
                     if (parent.getParent() == null) {
+                        parent = null;
                         break;
                     }
                     parent = parent.getParent();
                 }
                 if (parent instanceof GLSLParser.External_declarationContext list) {
-                    variable = list;
+                    boolean beforeFirstFunction = true;
+                    if (firstFuncExtDecl != null) {
+                        var grandparent = list.getParent();
+                        int listIdx = grandparent.children.indexOf(list);
+                        int funcIdx = grandparent.children.indexOf(firstFuncExtDecl);
+                        beforeFirstFunction = listIdx < funcIdx;
+                    }
+                    if (beforeFirstFunction) {
+                        variable = list;
+                    }
                 }
             }
-        }
 
-        if (variable == null){
-            var functionDefinitions = getContextsForRule(GLSLParser.RULE_function_definition);
-            if (functionDefinitions.iterator().next().getParent() instanceof GLSLParser.External_declarationContext list) {
-                variable = list;
+            // Fallback: anchor on the first function definition.
+            if (variable == null && firstFuncExtDecl != null) {
+                variable = firstFuncExtDecl;
             }
         }
 
