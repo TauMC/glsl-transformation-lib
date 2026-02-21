@@ -399,4 +399,43 @@ class ShaderPrinterTest {
         String expected = "#ifdef MY_FLAG\n#define FOO 1\n#endif\n";
         assertEquals(expected, formatPre(input));
     }
+
+    @Test
+    void elseIfChain() {
+        String input = "void main(){if(x<0.0){x=0.0;}else if(x>1.0){x=1.0;}else{x=0.5;}}";
+        String expected = ""
+            + "void main() {\n"
+            + "    if (x < 0.0) {\n"
+            + "        x = 0.0;\n"
+            + "    } else if (x > 1.0) {\n"
+            + "        x = 1.0;\n"
+            + "    } else {\n"
+            + "        x = 0.5;\n"
+            + "    }\n"
+            + "}\n";
+
+        assertEquals(expected, format(input));
+    }
+
+    @Test
+    void parenthesisedSubExpression() {
+        String input = "void main(){float r=1.0f/(a-b);}";
+        String expected = ""
+            + "void main() {\n"
+            + "    float r = 1.0f / (a - b);\n"
+            + "}\n";
+
+        assertEquals(expected, format(input));
+    }
+
+    @Test
+    void returnWithParens() {
+        String input = "float f(float x){return(x+1.0);}";
+        String expected = ""
+            + "float f(float x) {\n"
+            + "    return (x + 1.0);\n"
+            + "}\n";
+
+        assertEquals(expected, format(input));
+    }
 }

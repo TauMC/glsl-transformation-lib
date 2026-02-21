@@ -300,7 +300,14 @@ public class ShaderPrinter {
             visitBranchStatement(rest.statement(0));
             if (rest.ELSE() != null) {
                 emit("else");
-                visitBranchStatement(rest.statement(1));
+                var elseStmt = rest.statement(1);
+                var simple = elseStmt.simple_statement();
+                if (simple != null && simple.selection_statement() != null) {
+                    // else if: visit nested if on the same line, no extra indent
+                    visit(elseStmt);
+                } else {
+                    visitBranchStatement(elseStmt);
+                }
             }
             newline();
             return null;
@@ -372,6 +379,12 @@ public class ShaderPrinter {
                     emit("}");
                     break;
                 case GLSLParser.LEFT_PAREN:
+                    if (!(node.getParent() instanceof GLSLParser.Primary_expressionContext)) {
+                        nosep();
+                    }
+                    emit(text);
+                    nosep();
+                    break;
                 case GLSLParser.LEFT_BRACKET:
                     nosep();
                     emit(text);
