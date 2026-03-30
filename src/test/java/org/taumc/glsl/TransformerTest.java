@@ -2,6 +2,7 @@ package org.taumc.glsl;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TransformerTest {
@@ -78,5 +79,97 @@ class TransformerTest {
         assertTrue(result.indexOf("uniform float uA") < helperPos, "uA should be before helper()");
         assertTrue(result.indexOf("uniform float uB") < helperPos, "uB should be before helper()");
         assertTrue(result.indexOf("uniform float uC") < helperPos, "uC should be before helper()");
+    }
+
+    /**
+     * removeConstAssignment must strip const from locals initialized with const
+     * parameters. GLSL 330 core requires const initializers to be compile-time
+     * constant expressions; function parameters do not qualify.
+     */
+    @Test
+    void removeConstAssignmentStripsConstFromLocalInitializedWithConstParam() {
+        String shader = "vec3 fn(vec3 d, const float p) { const float K = 0.5 * p; return d * K; }"
+            + "void main() { fn(vec3(1.0), 1.0); }";
+
+        String result = transform(shader, Transformer::removeConstAssignment);
+
+        assertTrue(result.contains("float K"), "K declaration should exist");
+        assertFalse(result.contains("const float K"), "const should be stripped from K");
+    }
+
+    /**
+     * After stripping const from a variable, add it to the tracked list. Later iterations may
+     * find it used in an expression (not a declaration). The method must not return, it must
+     * continue and also strip const from Y.
+     */
+    @Test
+    void removeConstAssignmentDoesNotAbortOnLaterUsage() {
+        String shader = "vec3 fn(const float a, const float b) {"
+            + "const float X = 0.5 * a; const float Y = 0.5 * b; return vec3(X + Y); }"
+            + "void main() { fn(1.0, 2.0); }";
+
+        String result = transform(shader, Transformer::removeConstAssignment);
+
+        assertFalse(result.contains("const float X"), "const should be stripped from X");
+        assertFalse(result.contains("const float Y"), "const should be stripped from Y");
+    }
+
+    /**
+     * removeUnusedFunctions must transitively remove dead functions. If top() calls
+     * mid() calls leaf(), and none are reachable from main(), all three must be
+     * removed -- not just top().
+     */
+    @Test
+    void removeUnusedFunctionsTransitiveRemoval() {
+        String shader = "float leaf() { return 1.0; }"
+            + "float mid(float x) { return leaf() + x; }"
+            + "float top() { return mid(2.0); }"
+            + "float used() { return 3.0; }"
+            + "void main() { used(); }";
+
+        String result = transform(shader, Transformer::removeUnusedFunctions);
+
+        assertFalse(result.contains("leaf"), "leaf should be removed");
+        assertFalse(result.contains("mid"), "mid should be removed");
+        assertFalse(result.contains("top"), "top should be removed");
+        assertTrue(result.contains("used"), "used should survive");
+        assertTrue(result.contains("main"), "main should survive");
+    }
+
+    /**
+     * Combined test matching SEUS Renewed scenario: dead caller keeps callee alive
+     * in single-pass removal, then removeConstAssignment must still strip const from
+     * the surviving callee's locals. Tests both fixes working together.
+     */
+    @Test
+    void removeUnusedThenConstAssignmentSEUSPattern() {
+        // caller() references callee() but is itself unused from main.
+        // Single-pass removeUnusedFunctions removes caller but not callee.
+        // callee has const params and const locals initialized from them.
+        String shader =
+            "vec3 callee(vec3 d, const float mie, const float ray) {"
+            + "  const float K_R = 0.186 * ray;"
+            + "  const float K_M = 0.035 * mie;"
+            + "  return d * K_R + d * K_M;"
+            + "}"
+            + "vec3 caller() { return callee(vec3(1.0), 1.0, 1.0); }"
+            + "float used() { return 3.0; }"
+            + "void main() { used(); }";
+
+        String result = transform(shader, t -> {
+            t.removeUnusedFunctions();
+            t.removeConstAssignment();
+        });
+
+        // With transitive removal: callee, caller both removed. Test passes.
+        // Without transitive removal: callee survives, but const must be stripped.
+        // Either outcome is acceptable -- the shader must compile on GLSL 330 core.
+        if (result.contains("callee")) {
+            // callee survived (single-pass). const must be stripped.
+            assertFalse(result.contains("const float K_R"), "const should be stripped from K_R");
+            assertFalse(result.contains("const float K_M"), "const should be stripped from K_M");
+        }
+        // caller must always be removed (unreachable from main directly)
+        assertFalse(result.contains("caller"), "caller should be removed");
     }
 }

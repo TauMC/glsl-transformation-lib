@@ -472,14 +472,18 @@ public class Transformer {
     }
 
     public void removeUnusedFunctions() {
-        Collection<GLSLParser.Function_prototypeContext> functionPrototypes = getContextsForRule(GLSLParser.RULE_function_prototype);
-        Collection<GLSLParser.Variable_identifierContext> variableIdentifiers = getContextsForRule(GLSLParser.RULE_variable_identifier);
-        List<String> result = functionPrototypes.stream().map(c -> c.IDENTIFIER().getText()).collect(Collectors.toList());
-        List<String> usedIdentifiers = variableIdentifiers.stream().map(c -> c.IDENTIFIER().getText()).collect(Collectors.toList());
-        List<String> functionsToRemove = result.stream().filter(name -> !usedIdentifiers.contains(name) && !name.equals("main")).collect(Collectors.toList());
-        // TODO - remove all the functions in one walk of the tree
-        for (String name : functionsToRemove) {
-            removeFunction(name);
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            Collection<GLSLParser.Function_prototypeContext> functionPrototypes = getContextsForRule(GLSLParser.RULE_function_prototype);
+            Collection<GLSLParser.Variable_identifierContext> variableIdentifiers = getContextsForRule(GLSLParser.RULE_variable_identifier);
+            List<String> result = functionPrototypes.stream().map(c -> c.IDENTIFIER().getText()).collect(Collectors.toList());
+            List<String> usedIdentifiers = variableIdentifiers.stream().map(c -> c.IDENTIFIER().getText()).collect(Collectors.toList());
+            List<String> functionsToRemove = result.stream().filter(name -> !usedIdentifiers.contains(name) && !name.equals("main")).collect(Collectors.toList());
+            for (String name : functionsToRemove) {
+                removeFunction(name);
+                changed = true;
+            }
         }
     }
 
@@ -515,13 +519,14 @@ public class Transformer {
     public void removeConstAssignment(Map<String, List<String>> functions) {
         Collection<GLSLParser.Variable_identifierContext> variableIdentifiers = getContextsForRule(GLSLParser.RULE_variable_identifier);
         for (Map.Entry<String, List<String>> entry : functions.entrySet()) {
+            nextIdentifier:
             for (var ctx : variableIdentifiers) {
                 if (entry.getValue().contains(ctx.IDENTIFIER().getText())) {
                     var parent = ctx.getParent();
                     while (!(parent instanceof GLSLParser.Function_definitionContext definitionContext)) {
                         parent = parent.getParent();
                         if (parent == null) {
-                            return;
+                            continue nextIdentifier;
                         }
                     }
 
@@ -530,7 +535,7 @@ public class Transformer {
                         while (!(parent instanceof GLSLParser.Single_declarationContext declarationContext)) {
                             parent = parent.getParent();
                             if (parent == null) {
-                                return;
+                                continue nextIdentifier;
                             }
                         }
 
@@ -538,7 +543,7 @@ public class Transformer {
 
                         GLSLParser.Type_qualifierContext typeQualifierContext = declarationContext.fully_specified_type().type_qualifier();
                         if (typeQualifierContext == null || typeQualifierContext.single_type_qualifier(0) == null) {
-                            return;
+                            continue nextIdentifier;
                         }
                         GLSLParser.Storage_qualifierContext storageQualifierContext = typeQualifierContext.single_type_qualifier(0).storage_qualifier();
                         if (storageQualifierContext != null && storageQualifierContext.CONST() != null) {
