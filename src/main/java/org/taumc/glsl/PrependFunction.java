@@ -22,7 +22,7 @@ public class PrependFunction extends GLSLParserBaseListener {
     @Override
     public void enterFunction_definition(GLSLParser.Function_definitionContext ctx) {
         if (ctx.function_prototype().IDENTIFIER().getText().equals(name)) {
-            ctx.compound_statement_no_new_scope().statement_list().children.add(0, insert);
+            Util.injectStatement(ctx.compound_statement_no_new_scope(), insert, true);
         }
     }
 }

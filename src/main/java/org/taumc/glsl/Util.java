@@ -78,6 +78,19 @@ public class Util {
         ParseTreeWalker.DEFAULT.walk(new PrependFunction("main", code), root);
     }
 
+    static ParserRuleContext injectStatement(GLSLParser.Compound_statement_no_new_scopeContext body, GLSLParser.StatementContext insert, boolean atStart) {
+        GLSLParser.Statement_listContext list = body.statement_list();
+        boolean created = list == null;
+        if (created) {
+            list = new GLSLParser.Statement_listContext(body, -1);
+            list.children = new ArrayList<>(); // ANTLR lazily creates children
+            body.children.add(body.children.size() - 1, list);
+        }
+        list.children.add(atStart ? 0 : list.children.size(), insert);
+        insert.parent = list;
+        return created ? list : insert;
+    }
+
     public static void removeVariable(GLSLParser.Translation_unitContext root, String code) {
         AtomicReference<ParserRuleContext> top = new AtomicReference<>();
         ParseTreeWalker.DEFAULT.walk(new RemoveVariable(code, top), root);
