@@ -21,7 +21,7 @@ public class AppendFunction extends GLSLParserBaseListener {
     @Override
     public void enterFunction_definition(GLSLParser.Function_definitionContext ctx) {
         if (ctx.function_prototype().IDENTIFIER().getText().equals(name)) {
-            ctx.compound_statement_no_new_scope().statement_list().children.add(insert);
+            Util.injectStatement(ctx.compound_statement_no_new_scope(), insert, false);
         }
     }
 }

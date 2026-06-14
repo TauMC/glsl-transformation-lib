@@ -1,6 +1,7 @@
 package org.taumc.glsl;
 
 import org.junit.jupiter.api.Test;
+import org.taumc.glsl.grammar.GLSLParser;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -171,5 +172,27 @@ class TransformerTest {
         }
         // caller must always be removed (unreachable from main directly)
         assertFalse(result.contains("caller"), "caller should be removed");
+    }
+
+    @Test
+    void injectIntoEmptyMainBody() {
+        String result = transform("void main(){}", t -> {
+            t.prependMain("first = 1;");
+            t.appendMain("last = 2;");
+        });
+        int first = result.indexOf("first = 1;");
+        int last = result.indexOf("last = 2;");
+        assertTrue(first > result.indexOf("{") && first < result.indexOf("}"), "prepended stmt should be inside main");
+        assertTrue(last > first && last < result.indexOf("}"), "appended stmt should follow, inside main");
+    }
+
+    @Test
+    void utilInjectIntoEmptyMainBody() {
+        GLSLParser.Translation_unitContext root = ShaderParser.parseShader("void main(){}").full();
+        Util.prependMain(root, "first = 1;");
+        Util.appendMain(root, "last = 2;");
+        String result = new ShaderPrinter(root).getFormattedShader();
+        assertTrue(result.indexOf("first = 1;") >= 0, "prepended statement missing");
+        assertTrue(result.indexOf("last = 2;") > result.indexOf("first = 1;"), "appended stmt should follow prepended");
     }
 }

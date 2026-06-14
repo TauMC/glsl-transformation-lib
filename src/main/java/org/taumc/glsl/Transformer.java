@@ -247,8 +247,7 @@ public class Transformer {
         Collection<GLSLParser.Function_definitionContext> functionDefinitions = getContextsForRule(GLSLParser.RULE_function_definition);
         for (var ctx : functionDefinitions) {
             if (ctx.function_prototype().IDENTIFIER().getText().equals("main")) {
-                ctx.compound_statement_no_new_scope().statement_list().children.add(0, insert);
-                scanNode(insert);
+                scanNode(Util.injectStatement(ctx.compound_statement_no_new_scope(), insert, true));
             }
         }
     }
@@ -338,8 +337,7 @@ public class Transformer {
         Collection<GLSLParser.Function_definitionContext> functionDefinitions = getContextsForRule(GLSLParser.RULE_function_definition);
         for (var ctx : functionDefinitions) {
             if (ctx.function_prototype().IDENTIFIER().getText().equals("main")) {
-                ctx.compound_statement_no_new_scope().statement_list().children.add(insert);
-                scanNode(insert);
+                scanNode(Util.injectStatement(ctx.compound_statement_no_new_scope(), insert, false));
             }
         }
     }
