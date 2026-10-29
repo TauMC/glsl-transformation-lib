@@ -16,8 +16,16 @@ import java.util.stream.Collectors;
 
 public class Transformer {
     private final GLSLParser.Translation_unitContext root;
-    final Collection<ParserRuleContext>[] cachedContexts;
-    final Map<String, Collection<ParserRuleContext>>[] cachedContextsByText;
+    // Every rule context in the tree, by rule index, in the order they were added.
+    private final Collection<ParserRuleContext>[] cachedContexts;
+    // Every terminal in the tree, by its token's text, so that finding a name or an expression doesn't have to scan
+    // the whole tree. Token text changed through this class keeps it up to date; see setTokenText.
+    private final Map<String, Set<TerminalNode>> terminalsByText = new HashMap<>();
+    // The key each terminal is filed under, which differs from its text if that was changed from outside.
+    private final Map<TerminalNode, String> terminalKeys = new IdentityHashMap<>();
+    // Set by mutateTree, whose changes the terminal index can't follow.
+    private boolean terminalIndexStale = false;
+    private final ArrayDeque<ParseTree> walkStack = new ArrayDeque<>();
 
     public GLSLParser.External_declarationContext variable = null;
     public GLSLParser.External_declarationContext function = null;
@@ -28,38 +36,151 @@ public class Transformer {
         return ruleIndex >= 0 && ruleIndex < this.cachedContexts.length ? (Collection<T>)this.cachedContexts[ruleIndex] : Collections.emptyList();
     }
 
-    private Map<String, Collection<ParserRuleContext>> buildCacheForRuleIndex(int ruleIndex) {
-        var contexts = getContextsForRule(ruleIndex);
-        Map<String, Collection<ParserRuleContext>> map = new HashMap<>();
-
-        for (var ctx : contexts) {
-            Collection<ParserRuleContext> coll = map.computeIfAbsent(ctx.getText(), k -> Collections.newSetFromMap(new IdentityHashMap<>()));
-            coll.add(ctx);
-        }
-
-        cachedContextsByText[ruleIndex] = map;
-
-        return map;
-    }
-
     @SuppressWarnings("unchecked")
-    private <T extends ParserRuleContext> Collection<T> getCachedContextsByText(int ruleIndex, String text) {
-        Map<String, Collection<ParserRuleContext>> cacheByText = cachedContextsByText[ruleIndex];
-        if (cacheByText == null) {
-            cacheByText = buildCacheForRuleIndex(ruleIndex);
-        }
-        var collection = cacheByText.get(text);
-        return collection != null ? (Collection<T>)collection : Collections.emptySet();
-    }
-
     public Transformer(GLSLParser.Translation_unitContext root) {
         this.root = root;
         this.cachedContexts = new Collection[GLSLParser.ruleNames.length];
         for (int i = 0; i < this.cachedContexts.length; i++) {
             this.cachedContexts[i] = new LinkedHashSet<>();
         }
-        this.cachedContextsByText = new Map[GLSLParser.ruleNames.length];
-        ParseTreeWalker.DEFAULT.walk(new TransformerCollector(this), root);
+        scanNode(root);
+    }
+
+    /**
+     * Adds a subtree to the indexes, visiting rule contexts in the same pre-order as ANTLR's tree walker.
+     */
+    private void scanNode(ParseTree node) {
+        var stack = walkStack;
+        stack.push(node);
+        while (!stack.isEmpty()) {
+            var current = stack.pop();
+            if (current instanceof ParserRuleContext ctx) {
+                int ruleIndex = ctx.getRuleIndex();
+                if (ruleIndex >= 0 && ruleIndex < cachedContexts.length) {
+                    cachedContexts[ruleIndex].add(ctx);
+                }
+                var children = ctx.children;
+                if (children != null) {
+                    for (int i = children.size() - 1; i >= 0; i--) {
+                        stack.push(children.get(i));
+                    }
+                }
+            } else if (current instanceof TerminalNode terminal) {
+                addTerminal(terminal);
+            }
+        }
+    }
+
+    /**
+     * Removes a subtree from the indexes. The caller detaches it from the tree.
+     */
+    private void removeNode(ParseTree node) {
+        var stack = walkStack;
+        stack.push(node);
+        while (!stack.isEmpty()) {
+            var current = stack.pop();
+            if (current instanceof ParserRuleContext ctx) {
+                int ruleIndex = ctx.getRuleIndex();
+                if (ruleIndex >= 0 && ruleIndex < cachedContexts.length) {
+                    cachedContexts[ruleIndex].remove(ctx);
+                }
+                var children = ctx.children;
+                if (children != null) {
+                    for (int i = children.size() - 1; i >= 0; i--) {
+                        stack.push(children.get(i));
+                    }
+                }
+            } else if (current instanceof TerminalNode terminal) {
+                removeTerminal(terminal);
+            }
+        }
+    }
+
+    private void addTerminal(TerminalNode terminal) {
+        String key = terminal.getText();
+        terminalsByText.computeIfAbsent(key, k -> new LinkedHashSet<>()).add(terminal);
+        terminalKeys.put(terminal, key);
+    }
+
+    private void removeTerminal(TerminalNode terminal) {
+        String key = terminalKeys.remove(terminal);
+        if (key != null) {
+            terminalsByText.get(key).remove(terminal);
+        }
+    }
+
+    private void setTokenText(TerminalNode terminal, CommonToken token, String text) {
+        removeTerminal(terminal);
+        token.setText(text);
+        addTerminal(terminal);
+    }
+
+    /**
+     * Returns the terminals whose text currently is {@code text}, as a list that stays valid while the tree changes.
+     */
+    private List<TerminalNode> terminalsWithText(String text) {
+        if (terminalIndexStale) {
+            terminalsByText.clear();
+            terminalKeys.clear();
+            var stack = walkStack;
+            stack.push(root);
+            while (!stack.isEmpty()) {
+                var current = stack.pop();
+                if (current instanceof ParserRuleContext ctx) {
+                    if (ctx.children != null) {
+                        for (int i = ctx.children.size() - 1; i >= 0; i--) {
+                            stack.push(ctx.children.get(i));
+                        }
+                    }
+                } else if (current instanceof TerminalNode terminal) {
+                    addTerminal(terminal);
+                }
+            }
+            terminalIndexStale = false;
+        }
+        var terminals = terminalsByText.get(text);
+        if (terminals == null || terminals.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<TerminalNode> result = new ArrayList<>(terminals.size());
+        for (var terminal : terminals) {
+            // Skip tokens whose text was changed from outside since they were indexed.
+            if (text.equals(terminal.getText())) {
+                result.add(terminal);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Whether the terminal is the identifier of a context for one of the given rules, like a variable_identifier's.
+     */
+    private static boolean isIdentifierOf(TerminalNode terminal, int ruleA, int ruleB, int ruleC) {
+        if (terminal.getSymbol().getType() != GLSLParser.IDENTIFIER || !(terminal.getParent() instanceof ParserRuleContext parent)) {
+            return false;
+        }
+        int ruleIndex = parent.getRuleIndex();
+        return ruleIndex == ruleA || ruleIndex == ruleB || ruleIndex == ruleC;
+    }
+
+    private static ParseTree firstLeaf(ParseTree node) {
+        while (node.getChildCount() > 0) {
+            node = node.getChild(0);
+        }
+        return node;
+    }
+
+    /**
+     * Calls the action for each context that the terminal is the first leaf of, innermost first.
+     */
+    private static void forEachContextStartingWith(TerminalNode terminal, Consumer<ParserRuleContext> action) {
+        ParseTree child = terminal;
+        var parent = terminal.getParent();
+        while (parent instanceof ParserRuleContext ctx && ctx.getChildCount() > 0 && ctx.getChild(0) == child) {
+            action.accept(ctx);
+            child = ctx;
+            parent = ctx.getParent();
+        }
     }
 
     /**
@@ -163,20 +284,21 @@ public class Transformer {
     }
 
     public void rename(Map<String, String> names) {
+        // Collected before renaming anything, so that a name renamed to another key isn't renamed twice.
         List<TerminalNode> nodes = new ArrayList<>();
-        Collection<GLSLParser.Typeless_declarationContext> typelessDeclarations = getContextsForRule(GLSLParser.RULE_typeless_declaration);
-        Collection<GLSLParser.Function_prototypeContext> functionPrototypes = getContextsForRule(GLSLParser.RULE_function_prototype);
-        Collection<GLSLParser.Variable_identifierContext> variableIdentifiers = getContextsForRule(GLSLParser.RULE_variable_identifier);
-        nodes.addAll(typelessDeclarations.stream().map(GLSLParser.Typeless_declarationContext::IDENTIFIER).collect(Collectors.toList()));
-        nodes.addAll(variableIdentifiers.stream().map(GLSLParser.Variable_identifierContext::IDENTIFIER).collect(Collectors.toList()));
-        nodes.addAll(functionPrototypes.stream().map(GLSLParser.Function_prototypeContext::IDENTIFIER).collect(Collectors.toList()));
-        for (var node : nodes) {
-            Token token = node.getSymbol();
-            if(token instanceof CommonToken cToken) {
-                String replacement = names.get(cToken.getText());
-                if(replacement != null) {
-                    cToken.setText(replacement);
+        List<String> replacements = new ArrayList<>();
+        for (var entry : names.entrySet()) {
+            for (var node : terminalsWithText(entry.getKey())) {
+                if (isIdentifierOf(node, GLSLParser.RULE_typeless_declaration, GLSLParser.RULE_variable_identifier, GLSLParser.RULE_function_prototype)) {
+                    nodes.add(node);
+                    replacements.add(entry.getValue());
                 }
+            }
+        }
+        for (int i = 0; i < nodes.size(); i++) {
+            var node = nodes.get(i);
+            if (node.getSymbol() instanceof CommonToken cToken) {
+                setTokenText(node, cToken, replacements.get(i));
             }
         }
     }
@@ -215,10 +337,28 @@ public class Transformer {
         return matches && currentIndex == text.length();
     }
 
+    @SuppressWarnings("unchecked")
     public <T extends ParserRuleContext> void replaceExpression(String oldCode, String newCode, Function<GLSLParser, T> expressionType) {
         var oldExpression = ShaderParser.parseSnippet(oldCode, expressionType);
         String oldText = oldExpression.getText();
-        List<T> exprList = new ArrayList<>(getCachedContextsByText(oldExpression.getRuleIndex(), oldText));
+        int ruleIndex = oldExpression.getRuleIndex();
+        List<T> exprList = new ArrayList<>();
+        if (firstLeaf(oldExpression) instanceof TerminalNode first) {
+            // A match's first leaf has the same text as the expression's, so only contexts above those can match.
+            for (var terminal : terminalsWithText(first.getText())) {
+                forEachContextStartingWith(terminal, ctx -> {
+                    if (ctx.getRuleIndex() == ruleIndex && textEqual(ctx, oldText)) {
+                        exprList.add((T) ctx);
+                    }
+                });
+            }
+        } else {
+            for (var ctx : getContextsForRule(ruleIndex)) {
+                if (textEqual(ctx, oldText)) {
+                    exprList.add((T) ctx);
+                }
+            }
+        }
         for (var ctx : exprList) {
             replaceNode(ctx, ShaderParser.parseSnippet(newCode, expressionType));
         }
@@ -230,16 +370,6 @@ public class Transformer {
         int i = oldNode.getParent().children.indexOf(oldNode);
         oldNode.getParent().children.set(i, newNode);
         removeNode(oldNode);
-    }
-
-    private void removeNode(ParserRuleContext node) {
-        var remover = new TransformerRemover(this);
-        ParseTreeWalker.DEFAULT.walk(remover, node);
-        remover.performRemovals();
-    }
-
-    private void scanNode(ParserRuleContext node) {
-        ParseTreeWalker.DEFAULT.walk(new TransformerCollector(this), node);
     }
 
     public void prependMain(String code) {
@@ -264,7 +394,7 @@ public class Transformer {
                             if (ctx.getParent().getParent() instanceof GLSLParser.Init_declarator_listContext list) {
                                 if (!list.typeless_declaration().isEmpty()) {
                                     var entry = list.typeless_declaration(0);
-                                    cToken.setText(entry.getText());
+                                    setTokenText(ctx.IDENTIFIER(), cToken, entry.getText());
                                     typeless = entry;
                                     break;
                                 } else {
@@ -287,12 +417,8 @@ public class Transformer {
 
         if (typeless.getParent() instanceof GLSLParser.Init_declarator_listContext listContext) {
             int i = listContext.children.indexOf(typeless);
-            if (listContext.children.remove(i-1) instanceof ParserRuleContext context) {
-                removeNode(context);
-            }
-            if (listContext.children.remove(i-1) instanceof ParserRuleContext context) {
-                removeNode(context);
-            }
+            removeNode(listContext.children.remove(i-1));
+            removeNode(listContext.children.remove(i-1));
         } else if (typeless.parent instanceof GLSLParser.Single_declarationContext singleContext) {
             ParserRuleContext node = singleContext.getParent().getParent().getParent();
             node.getParent().children.remove(node);
@@ -343,29 +469,18 @@ public class Transformer {
     }
 
     public boolean containsCall(String name) {
-        Collection<GLSLParser.Variable_identifierContext> variableIdentifiers = getContextsForRule(GLSLParser.RULE_variable_identifier);
-        for (var ctx : variableIdentifiers) {
-            if (ctx.IDENTIFIER().getSymbol() instanceof CommonToken cToken) {
-                if (cToken.getText().equals(name)) {
-                    return true;
-                }
+        for (var node : terminalsWithText(name)) {
+            if (isIdentifierOf(node, GLSLParser.RULE_variable_identifier, -1, -1)) {
+                return true;
             }
         }
         return false;
     }
 
     public boolean hasVariable(String name) {
-        List<TerminalNode> nodes = new ArrayList<>();
-        Collection<GLSLParser.Typeless_declarationContext> typelessDeclarations = getContextsForRule(GLSLParser.RULE_typeless_declaration);
-        Collection<GLSLParser.Function_prototypeContext> functionPrototypes = getContextsForRule(GLSLParser.RULE_function_prototype);
-        nodes.addAll(typelessDeclarations.stream().map(GLSLParser.Typeless_declarationContext::IDENTIFIER).collect(Collectors.toList()));
-        nodes.addAll(functionPrototypes.stream().map(GLSLParser.Function_prototypeContext::IDENTIFIER).collect(Collectors.toList()));
-        for (var node : nodes) {
-            Token token = node.getSymbol();
-            if(token instanceof CommonToken cToken) {
-                if (name.equals(cToken.getText())) {
-                    return true;
-                }
+        for (var node : terminalsWithText(name)) {
+            if (isIdentifierOf(node, GLSLParser.RULE_typeless_declaration, GLSLParser.RULE_function_prototype, -1)) {
+                return true;
             }
         }
         return false;
@@ -376,25 +491,34 @@ public class Transformer {
     }
 
     public void renameArray(Map<String, String> replacements, Set<Integer> found) {
-        Collection<GLSLParser.Postfix_expressionContext> postfixExpressions = getContextsForRule(GLSLParser.RULE_postfix_expression);
-        for (var ctx : postfixExpressions) {
-            if (ctx.postfix_expression() == null) {
-                continue;
+        // Finds name[i] from each use of the name: the variable_identifier, inside a primary_expression, inside the
+        // postfix_expression that is the first postfix_expression of the indexing one.
+        List<GLSLParser.Postfix_expressionContext> matches = new ArrayList<>();
+        List<String> matchReplacements = new ArrayList<>();
+        for (var entry : replacements.entrySet()) {
+            for (var node : terminalsWithText(entry.getKey())) {
+                if (node.getParent() instanceof GLSLParser.Variable_identifierContext identifier
+                        && identifier.getParent() instanceof GLSLParser.Primary_expressionContext primary
+                        && primary.variable_identifier() == identifier
+                        && primary.getParent() instanceof GLSLParser.Postfix_expressionContext inner
+                        && inner.primary_expression() == primary
+                        && inner.getParent() instanceof GLSLParser.Postfix_expressionContext ctx
+                        && ctx.postfix_expression() == inner
+                        && ctx.integer_expression() != null) {
+                    matches.add(ctx);
+                    matchReplacements.add(entry.getValue());
+                }
             }
-            if (ctx.postfix_expression().primary_expression() == null) {
-                continue;
-            }
-            if (ctx.postfix_expression().primary_expression().variable_identifier() == null) {
-                continue;
-            }
-            if (ctx.postfix_expression().primary_expression().variable_identifier().IDENTIFIER().getSymbol() instanceof CommonToken cToken) {
-                String replacement = replacements.get(cToken.getText());
-                if(replacement != null && ctx.integer_expression() != null) {
-                    String i = ctx.integer_expression().getText();
-                    found.add(Integer.parseInt(i));
-                    cToken.setText(replacement + i);
-                    ctx.removeLastChild();
-                    ctx.removeLastChild();
+        }
+        for (int m = 0; m < matches.size(); m++) {
+            var ctx = matches.get(m);
+            var identifier = ctx.postfix_expression().primary_expression().variable_identifier().IDENTIFIER();
+            if (identifier.getSymbol() instanceof CommonToken cToken) {
+                String i = ctx.integer_expression().getText();
+                found.add(Integer.parseInt(i));
+                setTokenText(identifier, cToken, matchReplacements.get(m) + i);
+                for (int r = 0; r < 3; r++) {
+                    removeNode(ctx.children.get(ctx.children.size() - 1));
                     ctx.removeLastChild();
                 }
             }
@@ -408,6 +532,7 @@ public class Transformer {
      */
     public void mutateTree(Consumer<GLSLParser.Translation_unitContext> contextConsumer) {
         contextConsumer.accept(root);
+        terminalIndexStale = true;
     }
 
     public void renameFunctionCall(String oldName, String newName) {
@@ -415,52 +540,80 @@ public class Transformer {
     }
 
     public void renameFunctionCall(Map<String, String> names) {
+        // Collected before renaming anything, so that a name renamed to another key isn't renamed twice.
         List<TerminalNode> nodes = new ArrayList<>();
-        Collection<GLSLParser.Function_prototypeContext> functionPrototypes = getContextsForRule(GLSLParser.RULE_function_prototype);
-        Collection<GLSLParser.Variable_identifierContext> variableIdentifiers = getContextsForRule(GLSLParser.RULE_variable_identifier);
-        Collection<GLSLParser.Type_specifier_nonarrayContext> nonArraySpecifiers = getContextsForRule(GLSLParser.RULE_type_specifier_nonarray);
-
-        nodes.addAll(functionPrototypes.stream().map(GLSLParser.Function_prototypeContext::IDENTIFIER).collect(Collectors.toList()));
-        nodes.addAll(variableIdentifiers.stream().map(GLSLParser.Variable_identifierContext::IDENTIFIER).collect(Collectors.toList()));
-        nodes.addAll(nonArraySpecifiers.stream().map(c -> {
-            if (c.TEXTURE2D() != null) {
-                return c.TEXTURE2D();
-            } else {
-                return c.TEXTURE3D();
-            }
-        }).filter(Objects::nonNull).collect(Collectors.toList()));
-        for (var node : nodes) {
-            Token token = node.getSymbol();
-            if(token instanceof CommonToken cToken) {
-                String replacement = names.get(cToken.getText());
-                if(replacement != null) {
-                    cToken.setText(replacement);
+        List<String> replacements = new ArrayList<>();
+        for (var entry : names.entrySet()) {
+            for (var node : terminalsWithText(entry.getKey())) {
+                int type = node.getSymbol().getType();
+                boolean matches = isIdentifierOf(node, GLSLParser.RULE_function_prototype, GLSLParser.RULE_variable_identifier, -1)
+                        || ((type == GLSLParser.TEXTURE2D || type == GLSLParser.TEXTURE3D)
+                            && node.getParent() instanceof GLSLParser.Type_specifier_nonarrayContext);
+                if (matches) {
+                    nodes.add(node);
+                    replacements.add(entry.getValue());
                 }
+            }
+        }
+        for (int i = 0; i < nodes.size(); i++) {
+            var node = nodes.get(i);
+            if (node.getSymbol() instanceof CommonToken cToken) {
+                setTokenText(node, cToken, replacements.get(i));
             }
         }
     }
 
     public void renameAndWrapShadow(String oldName, String newName) {
-        List<GLSLParser.Postfix_expressionContext> postfixExpressions = new ArrayList<>(getContextsForRule(GLSLParser.RULE_postfix_expression));
-        for (var expr : postfixExpressions) {
-            if (expr.function_call_parameters() == null) {
-                continue;
-            }
-            String function = expr.getText();
-            if (expr.function_call_parameters() != null && function.startsWith(oldName + "(")) {
-                function = "vec4" + "(" + function + ")";
-                var def = ShaderParser.parseSnippet(function, GLSLParser::postfix_expression);
-                replaceNode(expr, def);
-            }
+        String callStart = oldName + "(";
+        List<GLSLParser.Postfix_expressionContext> calls = new ArrayList<>();
+        for (var terminal : terminalsWithText(oldName)) {
+            forEachContextStartingWith(terminal, ctx -> {
+                if (ctx instanceof GLSLParser.Postfix_expressionContext expr && expr.function_call_parameters() != null
+                        && expr.getText().startsWith(callStart)) {
+                    calls.add(expr);
+                }
+            });
+        }
+        for (var call : calls) {
+            wrapInVec4(call);
         }
         renameFunctionCall(oldName, newName);
     }
 
+    private static final String WRAP_PLACEHOLDER = "iris_wrapPlaceholder";
+
+    /**
+     * Replaces the expression with vec4(expression), moving the existing expression into the new call rather than
+     * printing and parsing it again.
+     */
+    private void wrapInVec4(GLSLParser.Postfix_expressionContext expr) {
+        var wrapper = ShaderParser.parseSnippet("vec4(" + WRAP_PLACEHOLDER + ")", GLSLParser::postfix_expression);
+
+        // The placeholder is parsed as postfix_expression > primary_expression > variable_identifier, which is where
+        // a postfix_expression argument goes.
+        ParseTree placeholder = firstLeaf(wrapper.function_call_parameters());
+        while (!(placeholder instanceof GLSLParser.Postfix_expressionContext)) {
+            placeholder = placeholder.getParent();
+        }
+
+        // Re-added below together with the wrapper, which leaves the indexes in the same order as replacing the
+        // expression with a freshly parsed copy would.
+        removeNode(expr);
+
+        var parent = expr.getParent();
+        parent.children.set(parent.children.indexOf(expr), wrapper);
+        wrapper.parent = parent;
+
+        var placeholderParent = (ParserRuleContext) placeholder.getParent();
+        placeholderParent.children.set(placeholderParent.children.indexOf(placeholder), expr);
+        expr.parent = placeholderParent;
+
+        scanNode(wrapper);
+    }
+
     public void removeFunction(String name) {
-        Collection<GLSLParser.Function_prototypeContext> functionPrototypes = getContextsForRule(GLSLParser.RULE_function_prototype);
-        var functionPrototype = new ArrayList<>(functionPrototypes);
-        for (var ctx : functionPrototype) {
-            if (ctx.IDENTIFIER().getText().equals(name)) {
+        for (var node : terminalsWithText(name)) {
+            if (node.getParent() instanceof GLSLParser.Function_prototypeContext ctx && ctx.IDENTIFIER() == node) {
                 if (ctx.getParent().getParent() instanceof GLSLParser.External_declarationContext declarationContext) {
                     declarationContext.getParent().children.remove(declarationContext);
                     removeNode(declarationContext);
@@ -474,10 +627,13 @@ public class Transformer {
         while (changed) {
             changed = false;
             Collection<GLSLParser.Function_prototypeContext> functionPrototypes = getContextsForRule(GLSLParser.RULE_function_prototype);
-            Collection<GLSLParser.Variable_identifierContext> variableIdentifiers = getContextsForRule(GLSLParser.RULE_variable_identifier);
-            List<String> result = functionPrototypes.stream().map(c -> c.IDENTIFIER().getText()).collect(Collectors.toList());
-            List<String> usedIdentifiers = variableIdentifiers.stream().map(c -> c.IDENTIFIER().getText()).collect(Collectors.toList());
-            List<String> functionsToRemove = result.stream().filter(name -> !usedIdentifiers.contains(name) && !name.equals("main")).collect(Collectors.toList());
+            List<String> functionsToRemove = new ArrayList<>();
+            for (var prototype : functionPrototypes) {
+                String name = prototype.IDENTIFIER().getText();
+                if (!name.equals("main") && !containsCall(name)) {
+                    functionsToRemove.add(name);
+                }
+            }
             for (String name : functionsToRemove) {
                 removeFunction(name);
                 changed = true;

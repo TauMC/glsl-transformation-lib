@@ -195,4 +195,37 @@ class TransformerTest {
         assertTrue(result.indexOf("first = 1;") >= 0, "prepended statement missing");
         assertTrue(result.indexOf("last = 2;") > result.indexOf("first = 1;"), "appended stmt should follow prepended");
     }
+
+    /**
+     * Regression test: a name renamed after an earlier replacement must still be found by later replacements and
+     * queries, and the old name must no longer be.
+     */
+    @Test
+    void replaceExpressionFindsNamesRenamedAfterEarlierReplacements() {
+        String shader = "uniform vec4 a;uniform vec4 b;void main(){vec4 x=a+b;vec4 y=b.xy.xyxy;}";
+
+        String result = transform(shader, t -> {
+            t.replaceExpression("a", "vec4(0.0)");
+            t.rename("b", "c");
+            assertTrue(t.containsCall("c"), "renamed identifier not found");
+            assertFalse(t.containsCall("b"), "old name still found after rename");
+            t.replaceExpression("c", "vec4(1.0)");
+        });
+
+        assertTrue(result.contains("vec4(0.0) + vec4(1.0)"), "renamed identifier was not replaced: " + result);
+        assertTrue(result.contains("vec4(1.0).xy.xyxy"), "member access on the replacement is missing: " + result);
+    }
+
+    /**
+     * Wrapping must keep the call's arguments and leave other calls alone.
+     */
+    @Test
+    void renameAndWrapShadowWrapsOnlyMatchingCalls() {
+        String shader = "uniform sampler2DShadow s;void main(){float v=shadow2D(s,vec3(0.0)).x+shadow2DLod(s,vec3(0.0),0.0).x;}";
+
+        String result = transform(shader, t -> t.renameAndWrapShadow("shadow2D", "texture"));
+
+        assertTrue(result.contains("vec4(texture(s, vec3(0.0))).x") || result.contains("vec4(texture(s,vec3(0.0))).x"), "call was not wrapped: " + result);
+        assertTrue(result.contains("shadow2DLod(s"), "other call was changed: " + result);
+    }
 }
