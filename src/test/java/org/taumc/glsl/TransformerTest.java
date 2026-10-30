@@ -249,4 +249,65 @@ class TransformerTest {
         assertTrue(yPos < mainPos, "uniform y should appear before main: " + result);
         assertFalse(result.contains("float x"), "removed variable is still declared: " + result);
     }
+
+    @Test
+    void injectFunctionWithoutFunctions() {
+        String result = transform("uniform float b;void f(){}", t -> {
+            t.removeFunction("f");
+            t.injectFunction("void g(){}");
+        });
+
+        assertTrue(result.contains("void g()"), "function was not injected: " + result);
+        assertTrue(result.indexOf("uniform float b") < result.indexOf("void g()"), "function should follow the declarations: " + result);
+    }
+
+    @Test
+    void injectVariableAfterMutateTreeRemovesInjectionPoint() {
+        String result = transform("uniform float b;uniform float c;void main(){}", t -> {
+            t.injectVariable("uniform float x;");
+            t.mutateTree(root -> root.children.remove(0));
+            t.injectVariable("uniform float y;");
+            assertTrue(t.hasVariable("y"), "injected variable is missing from the index");
+            assertFalse(t.hasVariable("x"), "variable removed by mutateTree is still indexed");
+        });
+
+        assertTrue(result.contains("uniform float y"), "uniform y not found: " + result);
+        assertFalse(result.contains("float x"), "removed variable is still declared: " + result);
+    }
+
+    @Test
+    void removeFirstVariableOfDeclarationList() {
+        String result = transform("float a = 1.0, b = 2.0, c;uniform float d, e[2];void main(){}", t -> {
+            t.removeVariable("a");
+            t.removeVariable("d");
+            assertTrue(t.hasVariable("b"), "remaining variable b is missing from the index");
+            assertTrue(t.hasVariable("e"), "remaining variable e is missing from the index");
+            assertTrue(t.findType("c") != 0, "type of c was lost");
+        });
+
+        String compact = result.replace(" ", "");
+        assertTrue(compact.contains("floatb=2.0,c;"), "declaration list was not kept intact: " + result);
+        assertTrue(compact.contains("uniformfloate[2];"), "array declarator was not kept intact: " + result);
+        assertFalse(compact.contains("1.0"), "removed initializer is still present: " + result);
+    }
+
+    @Test
+    void renameArraySkipsNonConstantIndices() {
+        java.util.Set<Integer> found = new java.util.HashSet<>();
+        String result = transform("void main(){gl_FragData[0]=vec4(1.0);for(int i=0;i<2;i++)gl_FragData[i]=vec4(0.0);}",
+                t -> t.renameArray("gl_FragData", "iris_FragData", found));
+
+        assertTrue(found.equals(java.util.Collections.singleton(0)), "unexpected indices: " + found);
+        assertTrue(result.contains("iris_FragData0"), "constant index was not renamed: " + result);
+        assertTrue(result.replace(" ", "").contains("gl_FragData[i]"), "dynamic index was changed: " + result);
+    }
+
+    @Test
+    void rewriteStructArraysContinuesPastSizedArrays() {
+        String result = transform("struct T{float[2] y;};struct U{float[] a, b;};void main(){}", Transformer::rewriteStructArrays);
+
+        String compact = result.replace(" ", "");
+        assertTrue(compact.contains("float[2]y;"), "sized array was changed: " + result);
+        assertTrue(compact.contains("floata[],b[];"), "unsized array after a sized one was not rewritten: " + result);
+    }
 }

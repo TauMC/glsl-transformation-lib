@@ -23,8 +23,8 @@ public class Transformer {
     private final Map<String, Set<TerminalNode>> terminalsByText = new HashMap<>();
     // The key each terminal is filed under, which differs from its text if that was changed from outside.
     private final Map<TerminalNode, String> terminalKeys = new IdentityHashMap<>();
-    // Set by mutateTree, whose changes the terminal index can't follow.
-    private boolean terminalIndexStale = false;
+    // Set by mutateTree, whose changes the indexes can't follow.
+    private boolean indexesStale = false;
     private final ArrayDeque<ParseTree> walkStack = new ArrayDeque<>();
 
     public GLSLParser.External_declarationContext variable = null;
@@ -33,6 +33,7 @@ public class Transformer {
 
     @SuppressWarnings("unchecked")
     private <T extends ParserRuleContext> Collection<T> getContextsForRule(int ruleIndex) {
+        rebuildIndexesIfStale();
         return ruleIndex >= 0 && ruleIndex < this.cachedContexts.length ? (Collection<T>)this.cachedContexts[ruleIndex] : Collections.emptyList();
     }
 
@@ -126,25 +127,7 @@ public class Transformer {
      * Returns the terminals whose text currently is {@code text}, as a list that stays valid while the tree changes.
      */
     private List<TerminalNode> terminalsWithText(String text) {
-        if (terminalIndexStale) {
-            terminalsByText.clear();
-            terminalKeys.clear();
-            var stack = walkStack;
-            stack.push(root);
-            while (!stack.isEmpty()) {
-                var current = stack.pop();
-                if (current instanceof ParserRuleContext ctx) {
-                    if (ctx.children != null) {
-                        for (int i = ctx.children.size() - 1; i >= 0; i--) {
-                            stack.push(ctx.children.get(i));
-                        }
-                    }
-                } else if (current instanceof TerminalNode terminal) {
-                    addTerminal(terminal);
-                }
-            }
-            terminalIndexStale = false;
-        }
+        rebuildIndexesIfStale();
         var terminals = terminalsByText.get(text);
         if (terminals == null || terminals.isEmpty()) {
             return Collections.emptyList();
@@ -157,6 +140,19 @@ public class Transformer {
             }
         }
         return result;
+    }
+
+    private void rebuildIndexesIfStale() {
+        if (!indexesStale) {
+            return;
+        }
+        indexesStale = false;
+        for (var contexts : cachedContexts) {
+            contexts.clear();
+        }
+        terminalsByText.clear();
+        terminalKeys.clear();
+        scanNode(root);
     }
 
     /**
@@ -243,14 +239,12 @@ public class Transformer {
             }
         }
 
-        if (variable != null) {
-            var parent = variable.getParent();
-            int i = parent.children.indexOf(variable);
-            parent.children.add(i, insert);
-            insert.setParent(parent);
-            scanNode(insert);
-            ParseTreeWalker.DEFAULT.walk(new InjectorPoint(this, false), insert);
-        }
+        ParserRuleContext parent = variable != null ? variable.getParent() : root;
+        int i = variable != null ? parent.children.indexOf(variable) : parent.children.size();
+        parent.children.add(i, insert);
+        insert.setParent(parent);
+        scanNode(insert);
+        ParseTreeWalker.DEFAULT.walk(new InjectorPoint(this, false), insert);
     }
 
     public void injectFunction(String code) {
@@ -272,7 +266,7 @@ public class Transformer {
             parent = this.root;
         }
 
-        int i = parent.children.indexOf(function);
+        int i = function != null ? parent.children.indexOf(function) : parent.children.size();
         parent.children.add(i, insert);
         insert.setParent(parent);
         scanNode(insert);
@@ -400,10 +394,16 @@ public class Transformer {
                         if (ctx.getParent() instanceof GLSLParser.Single_declarationContext) {
                             if (ctx.getParent().getParent() instanceof GLSLParser.Init_declarator_listContext list) {
                                 if (!list.typeless_declaration().isEmpty()) {
-                                    var entry = list.typeless_declaration(0);
-                                    setTokenText(ctx.IDENTIFIER(), cToken, entry.getText());
-                                    typeless = entry;
-                                    break;
+                                    // The next declarator takes its place, keeping the type for the rest of the list
+                                    var single = (GLSLParser.Single_declarationContext) ctx.getParent();
+                                    var next = list.typeless_declaration(0);
+                                    int i = list.children.indexOf(next);
+                                    removeNode(list.children.remove(i - 1));
+                                    list.children.remove(i - 1);
+                                    single.children.set(single.children.indexOf(ctx), next);
+                                    next.setParent(single);
+                                    removeNode(ctx);
+                                    return;
                                 } else {
                                     typeless = ctx;
                                 }
@@ -511,7 +511,8 @@ public class Transformer {
                         && inner.primary_expression() == primary
                         && inner.getParent() instanceof GLSLParser.Postfix_expressionContext ctx
                         && ctx.postfix_expression() == inner
-                        && ctx.integer_expression() != null) {
+                        && ctx.integer_expression() != null
+                        && isIntegerLiteral(ctx.integer_expression().getText())) {
                     matches.add(ctx);
                     matchReplacements.add(entry.getValue());
                 }
@@ -532,6 +533,18 @@ public class Transformer {
         }
     }
 
+    private static boolean isIntegerLiteral(String text) {
+        if (text.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < text.length(); i++) {
+            if (!Character.isDigit(text.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /**
      * Mutate the underlying tree directly. All caches will be invalidated after your mutations, so this
      * should only be used in cases where no better transform is built-in.
@@ -539,7 +552,13 @@ public class Transformer {
      */
     public void mutateTree(Consumer<GLSLParser.Translation_unitContext> contextConsumer) {
         contextConsumer.accept(root);
-        terminalIndexStale = true;
+        indexesStale = true;
+        if (variable != null && !root.children.contains(variable)) {
+            variable = null;
+        }
+        if (function != null && !root.children.contains(function)) {
+            function = null;
+        }
     }
 
     public void renameFunctionCall(String oldName, String newName) {
@@ -781,12 +800,19 @@ public class Transformer {
             if (ctx.type_specifier().array_specifier() != null) {
                 var array_specifier = ctx.type_specifier().array_specifier();
                 if (array_specifier.dimension().get(0).constant_expression() != null) {
-                    return;
+                    continue;
                 }
                 ctx.type_specifier().children.remove(array_specifier);
+                boolean first = true;
                 for (var entry : ctx.struct_declarator_list().struct_declarator()) {
-                    array_specifier.setParent(entry);
-                    entry.children.add(array_specifier);
+                    // Each declarator needs its own node, since a node has only one parent
+                    var specifier = first ? array_specifier : ShaderParser.parseSnippet(array_specifier.getText(), GLSLParser::array_specifier);
+                    if (!first) {
+                        scanNode(specifier);
+                    }
+                    first = false;
+                    specifier.setParent(entry);
+                    entry.children.add(specifier);
                 }
             }
         }
