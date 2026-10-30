@@ -84,6 +84,13 @@ public class Transformer {
                 if (ruleIndex >= 0 && ruleIndex < cachedContexts.length) {
                     cachedContexts[ruleIndex].remove(ctx);
                 }
+                // Injection points are found again from the remaining declarations on the next injection
+                if (ctx == variable) {
+                    variable = null;
+                }
+                if (ctx == function) {
+                    function = null;
+                }
                 var children = ctx.children;
                 if (children != null) {
                     for (int i = children.size() - 1; i >= 0; i--) {

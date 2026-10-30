@@ -228,4 +228,25 @@ class TransformerTest {
         assertTrue(result.contains("vec4(texture(s, vec3(0.0))).x") || result.contains("vec4(texture(s,vec3(0.0))).x"), "call was not wrapped: " + result);
         assertTrue(result.contains("shadow2DLod(s"), "other call was changed: " + result);
     }
+
+    /**
+     * Removing the declaration injected variables are placed before must not break later injections.
+     */
+    @Test
+    void injectVariableAfterRemovingInjectionPoint() {
+        String shader = "uniform float b;void main(){}";
+
+        String result = transform(shader, t -> {
+            t.injectVariable("uniform float x;");
+            t.removeVariable("x");
+            t.injectVariable("uniform float y;");
+        });
+
+        int yPos = result.indexOf("uniform float y");
+        int mainPos = result.indexOf("void main");
+
+        assertTrue(yPos >= 0, "uniform y not found: " + result);
+        assertTrue(yPos < mainPos, "uniform y should appear before main: " + result);
+        assertFalse(result.contains("float x"), "removed variable is still declared: " + result);
+    }
 }
